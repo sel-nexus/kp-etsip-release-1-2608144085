@@ -20,4 +20,9 @@ export interface SessionContextValue {
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  updateProfile: (operation: () => Promise<SafeUser>) => Promise<void>;
 }
+
+export type LandingPage = 'dashboard' | 'portfolios' | 'applications' | 'reports' | 'users' | 'roles' | 'audit' | 'profile';
+export interface PasswordChange { currentPassword: string; newPassword: string }
+export interface ProfilePreferences { defaultLandingPage: LandingPage }

@@ -1,6 +1,7 @@
 /** Define implemented session routes and a single protected entry point. */
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useSession } from './features/auth/SessionProvider';
+import ProfilePage from './features/profile/ProfilePage';
 import LoginPage from './features/auth/LoginPage';
 import { AppLayout } from './components/AppLayout';
 import { Button } from './components/Button';
@@ -21,6 +22,11 @@ export function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={session.user ? <AppLayout /> : <Navigate to="/login" replace />} />
+      <Route path="/profile" element={session.user ? session.user.mustChangePassword ? <Navigate to="/" replace /> : (
+        <AppLayout>
+          <ProfilePage />
+        </AppLayout>
+      ) : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

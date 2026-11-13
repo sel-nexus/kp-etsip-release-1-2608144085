@@ -14,7 +14,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fields, setFields] = useState<Record<string, string>>({});
-  if (session.user) return <Navigate to="/" replace />;
+  if (session.user) return <Navigate to={session.user.mustChangePassword ? '/' : session.user.defaultLandingPage === 'profile' ? '/profile' : '/'} replace />;
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const errors: Record<string, string> = {};

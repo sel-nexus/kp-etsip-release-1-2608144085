@@ -1,11 +1,14 @@
 /** Show current session identity and links only to implemented routes. */
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useSession } from '../features/auth/SessionProvider';
 import { useRequest } from '../lib/useRequest';
 import { Button } from './Button';
 import { Card } from './Card';
+import type { PropsWithChildren } from 'react';
+import { PasswordChangeForm } from '../features/profile/PasswordChangeForm';
 /** Render the authenticated shell with explicit sign-out and identity refresh. */
-export function AppLayout() {
+export function AppLayout({ children }: PropsWithChildren) {
+  const location = useLocation();
   const session = useSession();
   const request = useRequest();
   const user = session.user;
@@ -19,25 +22,40 @@ export function AppLayout() {
       <header className="app-header">
         <Link to="/" className="brand">KP ETSIP</Link>
         <nav aria-label="Session navigation">
-          <Link to="/" aria-current="page">Session</Link>
+          <Link to="/" aria-current={location.pathname === '/' ? 'page' : undefined}>Session</Link>
+          {!user.mustChangePassword && <Link to="/profile" aria-current={location.pathname === '/profile' ? 'page' : undefined}>My profile</Link>}
           <Button variant="secondary" loading={request.loading} onClick={signOut}>Sign out</Button>
         </nav>
       </header>
       <main className="container">
-        <h1>Authenticated session</h1>
-        <Card>
-          <h2>{user.name}</h2>
-          <dl className="identity-details">
-            <dt>Email</dt><dd>{user.email}</dd>
-            <dt>Role</dt><dd>{user.role}</dd>
-            <dt>Status</dt><dd>{user.status}</dd>
-            <dt>Portfolio access</dt><dd>{user.portfolioAccess.length ? user.portfolioAccess.join(', ') : 'No explicit assignments'}</dd>
-          </dl>
-          {user.mustChangePassword && <p role="alert">Password change required. Protected actions are restricted.</p>}
-          <Button variant="secondary" loading={session.loading} onClick={() => void session.refresh()}>Refresh identity</Button>
-          {session.error && <p role="alert" className="error-text">{session.error}</p>}
-          <p role="status" aria-live="polite">{session.loading ? 'Refreshing identity…' : 'Signed in'}</p>
-        </Card>
+        {user.mustChangePassword ? (
+          <Card>
+            <h1>Secure your account</h1>
+            <PasswordChangeForm requiredChange />
+          </Card>
+        ) : children ?? (
+          <>
+            <h1>Authenticated session</h1>
+            <Card>
+              <h2>{user.name}</h2>
+              <dl className="identity-details">
+                <dt>Email</dt>
+                <dd>{user.email}</dd>
+                <dt>Role</dt>
+                <dd>{user.role}</dd>
+                <dt>Status</dt>
+                <dd>{user.status}</dd>
+                <dt>Portfolio access</dt>
+                <dd>{user.portfolioAccess.length ? user.portfolioAccess.join(', ') : 'No explicit assignments'}</dd>
+              </dl>
+              <Button variant="secondary" loading={session.loading} onClick={() => void session.refresh()}>
+                Refresh identity
+              </Button>
+              {session.error && <p role="alert" className="error-text">{session.error}</p>}
+              <p role="status" aria-live="polite">{session.loading ? 'Refreshing identity…' : 'Signed in'}</p>
+            </Card>
+          </>
+        )}
       </main>
     </div>
   );

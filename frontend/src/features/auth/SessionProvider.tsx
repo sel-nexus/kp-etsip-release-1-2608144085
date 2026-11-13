@@ -53,12 +53,20 @@ export function SessionProvider({ children }: PropsWithChildren) {
     setUser(result.user);
     setError(null);
   }, []);
+  const updateProfile = useCallback(async (operation: () => Promise<SafeUser>) => {
+    const current = ++generation.current;
+    const identity = await operation();
+    if (current === generation.current && localStorage.getItem(TOKEN_KEY)) {
+      setUser(identity);
+      setError(null);
+    }
+  }, []);
   const logout = useCallback(async () => {
     try { await authApi.logout(); }
     finally { clear(); }
   }, [clear]);
   return (
-    <SessionContext.Provider value={{ user, loading, error, login, logout, refresh }}>
+    <SessionContext.Provider value={{ user, loading, error, login, logout, refresh, updateProfile }}>
       {children}
     </SessionContext.Provider>
   );

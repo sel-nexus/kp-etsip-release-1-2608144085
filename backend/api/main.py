@@ -1,4 +1,4 @@
-"""Create the auth-only API and initialize its real Mongo lifecycle."""
+"""Create the session and profile API and initialize its real Mongo lifecycle."""
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo.errors import PyMongoError
@@ -6,6 +6,7 @@ from api.core.config import Settings
 from api.core.database import database_lifespan
 from api.core.errors import register_errors, DomainError
 from api.domains.auth.router import router
+from api.domains.auth.profile_router import router as profile_router
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Compose implemented routers only, with validated startup configuration."""
@@ -17,6 +18,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.add_middleware(CORSMiddleware, allow_origins=configuration.cors_origins, allow_methods=['GET', 'POST', 'PUT', 'DELETE'], allow_headers=['Authorization', 'Content-Type'])
     register_errors(application)
     application.include_router(router)
+    application.include_router(profile_router)
     @application.middleware('http')
     async def private_api(request: Request, call_next):
         """Prevent shared caches from retaining authenticated responses."""
