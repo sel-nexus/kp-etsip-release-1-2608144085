@@ -1,0 +1,27 @@
+/** Define implemented session routes and a single protected entry point. */
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { useSession } from './features/auth/SessionProvider';
+import LoginPage from './features/auth/LoginPage';
+import { AppLayout } from './components/AppLayout';
+import { Button } from './components/Button';
+/** Guard the shell while restored credentials are checked against the backend. */
+export function AppRoutes() {
+  const session = useSession();
+  if (session.loading) return <main className="container" role="status">Restoring session…</main>;
+  if (!session.user && session.error && localStorage.getItem('kp-etsip-token')) {
+    return (
+      <main className="container">
+        <p role="alert">{session.error}</p>
+        <Button onClick={() => void session.refresh()}>Retry session</Button>
+        <Button variant="secondary" onClick={() => void session.logout().catch(() => undefined)}>Sign out</Button>
+      </main>
+    );
+  }
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/" element={session.user ? <AppLayout /> : <Navigate to="/login" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}
