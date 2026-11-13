@@ -27,6 +27,9 @@ export function AppLayout({ children }: PropsWithChildren) {
           {!user.mustChangePassword && (
             <Link to="/portfolios" aria-current={location.pathname.startsWith('/portfolios') ? 'page' : undefined}>Portfolios</Link>
           )}
+          {!user.mustChangePassword && (
+            <Link to="/applications" aria-current={location.pathname.startsWith('/applications') ? 'page' : undefined}>Applications</Link>
+          )}
           <Button variant="secondary" loading={request.loading} onClick={signOut}>Sign out</Button>
         </nav>
       </header>

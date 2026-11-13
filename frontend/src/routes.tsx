@@ -5,6 +5,8 @@ import ProfilePage from './features/profile/ProfilePage';
 import LoginPage from './features/auth/LoginPage';
 import PortfolioList from './features/portfolios/PortfolioList';
 import PortfolioDetailPage from './features/portfolios/PortfolioDetailPage';
+import ApplicationList from './features/applications/ApplicationList';
+import ApplicationDetailPage from './features/applications/ApplicationDetailPage';
 import { AppLayout } from './components/AppLayout';
 import { Button } from './components/Button';
 /** Guard the shell while restored credentials are checked against the backend. */
@@ -37,6 +39,16 @@ export function AppRoutes() {
       <Route path="/portfolios/:id" element={session.user ? (
         <AppLayout>
           <PortfolioDetailPage />
+        </AppLayout>
+      ) : <Navigate to="/login" replace />} />
+      <Route path="/applications" element={session.user ? (
+        <AppLayout>
+          <ApplicationList />
+        </AppLayout>
+      ) : <Navigate to="/login" replace />} />
+      <Route path="/applications/:id" element={session.user ? (
+        <AppLayout>
+          <ApplicationDetailPage />
         </AppLayout>
       ) : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />

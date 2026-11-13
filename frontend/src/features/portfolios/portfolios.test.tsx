@@ -170,7 +170,7 @@ describe('Portfolio inventory', () => {
     expect(await screen.findByRole('heading', { name: 'Payments' })).toBeVisible();
     expect(screen.getByText('Services')).toBeVisible();
     expect(screen.getByText('Payment API')).toBeVisible();
-    expect(screen.queryByRole('link', { name: 'Payment API' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Payment API' })).toHaveAttribute('href', `/applications/${app.id}`);
     fetch.mockResolvedValueOnce(json(page()));
     await userEvent.click(screen.getByRole('link', { name: 'Back to portfolios' }));
     expect(await screen.findByRole('heading', { name: 'Portfolios' })).toBeVisible();

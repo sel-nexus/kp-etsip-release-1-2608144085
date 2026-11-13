@@ -52,3 +52,7 @@ th { font: var(--label-md); color: var(--on-surface-variant); }
 .modal-panel { width: min(100%, 600px); max-height: calc(100dvh - var(--space-4)); overflow: auto; padding: var(--space-4); background: var(--surface-container-lowest); border: 1px solid var(--card-border); border-radius: var(--radius-lg); }
 .pagination { margin-top: var(--space-3); }
 @media (max-width: 639px) { .app-header nav { flex-wrap: wrap; } .modal-panel { padding: var(--space-2); } }
+/* Group full application forms using the existing Vital Integrity rhythm. */
+fieldset { border: 0; padding: 0; margin: 0 0 var(--space-4); min-width: 0; }
+legend { font: var(--headline-md); margin-bottom: var(--space-3); }
+select[aria-invalid=true] { border-color: var(--error); }

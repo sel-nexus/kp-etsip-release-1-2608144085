@@ -156,7 +156,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
       await page.getByRole('button', { name: 'Apply filters' }).click();
       await page.getByRole('link', { name: portfolioData.assignedName, exact: true }).click();
       await expect(page.getByText(portfolioData.appName, { exact: true })).toBeVisible();
-      await expect(page.getByRole('link', { name: portfolioData.appName })).toHaveCount(0);
+      await expect(page.getByRole('link', { name: portfolioData.appName })).toHaveAttribute('href', /\/applications\/[0-9a-f]{24}$/);
       await page.getByRole('link', { name: 'Back to portfolios' }).click();
       await page.getByLabel('Search names').fill(portfolioData.assignedName);
       await page.getByRole('button', { name: 'Apply filters' }).click();

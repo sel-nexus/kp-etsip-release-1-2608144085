@@ -7,7 +7,7 @@ import { Badge } from '../../components/Badge';
 import { Pagination } from '../../components/Pagination';
 import { Button } from '../../components/Button';
 import type { Page, PortfolioDetail, RelatedApplication } from '../../types';
-/** Use no application-detail links until that route is implemented. */
+/** Link related applications to their complete inventory details. */
 export default function PortfolioDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [query, setQuery] = useSearchParams();
@@ -59,7 +59,7 @@ export default function PortfolioDetailPage() {
           <h2>Related applications</h2>
           {apps.items.length ? (
             <DataTable caption="Related applications" rows={apps.items} rowKey={(row) => row.id} columns={[
-              { key: 'name', label: 'Name', render: (row) => row.name },
+              { key: 'name', label: 'Name', render: (row) => <Link to={`/applications/${row.id}`}>{row.name}</Link> },
               { key: 'criticality', label: 'Criticality', render: (row) => row.criticality },
               { key: 'tier', label: 'Tier', render: (row) => row.tier },
               { key: 'lifecycle', label: 'Lifecycle status', render: (row) => row.lifecycleStatus },

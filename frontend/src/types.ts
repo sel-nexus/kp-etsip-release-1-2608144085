@@ -51,3 +51,34 @@ export interface RelatedApplication {
 }
 export interface Page<T> { items: T[]; page: number; pageSize: number; total: number }
 export interface PortfolioDetail { portfolio: Portfolio; applications: RelatedApplication[] }
+
+export interface ApplicationWrite {
+  name: string;
+  description: string;
+  portfolioId: string;
+  productArea: string;
+  businessOwner: string;
+  technologyOwner: string;
+  etsOwner: string;
+  criticality: RelatedApplication['criticality'];
+  tier: number;
+  lifecycleStatus: RelatedApplication['lifecycleStatus'];
+  technologyStack: string;
+  repositoryUrl: string | null;
+  pipelineUrl: string | null;
+  applicationHealthScore: number;
+  qualityScore: number;
+  automationCoverage: number;
+  unitTestCoverage: number;
+  openDefects: number;
+  openCriticalDefects: number;
+  riskLevel: RelatedApplication['riskLevel'];
+}
+export interface Application extends ApplicationWrite {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface ApplicationDetail extends Application {
+  portfolio: Pick<Portfolio, 'id' | 'name' | 'productArea' | 'status'>;
+}

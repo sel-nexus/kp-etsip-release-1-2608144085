@@ -79,16 +79,21 @@ class PortfolioService:
         """Reject references and stale snapshots; never cascade linked records.
 
         Notes:
-            The future application writer must coordinate reference creation with deletion.
+            Durable deletion intent excludes application reference reservations.
             Standalone Mongo does not provide a cross-collection transaction here.
         """
         require_permission(principal, 'delete', 'portfolio')
         snapshot = await self.snapshot(principal, identifier)
         if expected is not None and expected != snapshot['updatedAt']:
             raise DomainError('CONFLICT', 'Portfolio changed. Reload and try again.', 409)
+        if not await self.repository.begin_delete(portfolio_scope(principal), identifier, snapshot['updatedAt']):
+            await self.snapshot(principal, identifier)
+            raise DomainError('CONFLICT', 'Portfolio changed or references are being updated. Reload and try again.', 409)
         if await self.repository.referenced(identifier):
+            await self.repository.cancel_delete(identifier)
             raise DomainError('CONFLICT', 'Portfolio is referenced and cannot be deleted', 409)
         if not await self.repository.delete(portfolio_scope(principal), identifier, snapshot['updatedAt']):
+            await self.repository.cancel_delete(identifier)
             await self.snapshot(principal, identifier)
             raise DomainError('CONFLICT', 'Portfolio changed. Reload and try again.', 409)
         await self.audit.record(principal.user_id, principal.user_name, 'delete', 'portfolio', identifier, 'Deleted portfolio')

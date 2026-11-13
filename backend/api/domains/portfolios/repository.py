@@ -69,7 +69,16 @@ class PortfolioRepository:
         """Reject both application links and user assignments instead of cascading."""
         return await self.applications.find_one({'portfolioId': identifier}, {'_id': 1}) is not None or await self.users.find_one({'portfolioAccess': identifier}, {'_id': 1}) is not None
 
+    async def begin_delete(self, scope: Scope, identifier: ObjectId, updated_at: datetime) -> bool:
+        """Exclude new reference reservations before checking existing references."""
+        query = {'$and': [self.predicate(scope, PortfolioFilters(), identifier), {'updatedAt': updated_at, '_applicationDeleting': {'$ne': True}, '_applicationReservations.0': {'$exists': False}}]}
+        return (await self.portfolios.update_one(query, {'$set': {'_applicationDeleting': True}})).matched_count == 1
+
+    async def cancel_delete(self, identifier: ObjectId) -> None:
+        """Reopen a portfolio after a confirmed rejected deletion."""
+        await self.portfolios.update_one({'_id': identifier}, {'$unset': {'_applicationDeleting': ''}})
+
     async def delete(self, scope: Scope, identifier: ObjectId, updated_at: datetime) -> bool:
         """Delete only the previously observed scoped portfolio snapshot."""
-        query = {'$and': [self.predicate(scope, PortfolioFilters(), identifier), {'updatedAt': updated_at}]}
+        query = {'$and': [self.predicate(scope, PortfolioFilters(), identifier), {'updatedAt': updated_at, '_applicationDeleting': True, '_applicationReservations.0': {'$exists': False}}]}
         return (await self.portfolios.delete_one(query)).deleted_count == 1
