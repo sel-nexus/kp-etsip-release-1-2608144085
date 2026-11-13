@@ -26,3 +26,28 @@ export interface SessionContextValue {
 export type LandingPage = 'dashboard' | 'portfolios' | 'applications' | 'reports' | 'users' | 'roles' | 'audit' | 'profile';
 export interface PasswordChange { currentPassword: string; newPassword: string }
 export interface ProfilePreferences { defaultLandingPage: LandingPage }
+
+export interface PortfolioWrite {
+  name: string;
+  ownerName: string;
+  description: string;
+  productArea: string;
+  status: 'Active' | 'Archived';
+}
+export interface Portfolio extends PortfolioWrite {
+  id: string;
+  applicationCount: number;
+  qualityScore: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface RelatedApplication {
+  id: string;
+  name: string;
+  criticality: 'Low' | 'Medium' | 'High' | 'Critical';
+  tier: number;
+  lifecycleStatus: 'Active' | 'Deprecated' | 'Retired';
+  riskLevel: 'Low' | 'Medium' | 'High';
+}
+export interface Page<T> { items: T[]; page: number; pageSize: number; total: number }
+export interface PortfolioDetail { portfolio: Portfolio; applications: RelatedApplication[] }

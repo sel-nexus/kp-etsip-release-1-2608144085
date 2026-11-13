@@ -18,3 +18,9 @@ export function landingChoices(role: RoleName): LandingPage[] {
   if (role === 'Administrator' || role === 'Auditor') choices.push('audit');
   return choices;
 }
+
+/** Resolve only completed landing routes; unsupported pages retain the session entry. */
+export function landingPath(preference: string | null): string {
+  const completed: Record<string, string> = { profile: '/profile', portfolios: '/portfolios' };
+  return preference ? completed[preference] ?? '/' : '/';
+}

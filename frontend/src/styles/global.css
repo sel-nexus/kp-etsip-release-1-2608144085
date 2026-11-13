@@ -35,3 +35,20 @@ dd { margin: 0; overflow-wrap: anywhere; }
 @media (max-width: 1023px) { :root { --page-margin: 32px; --grid-columns: 8; } }
 @media (max-width: 639px) { :root { --page-margin: 16px; --grid-gutter: 16px; --grid-columns: 4; } h1 { font: var(--headline-lg-mobile); } .identity-details { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { * { transition-duration: 0s !important; animation-duration: 0s !important; } }
+
+select, textarea { width: 100%; min-height: 44px; padding: var(--space-2); border: 1px solid var(--outline); border-radius: var(--radius-default); background: var(--surface-container-lowest); color: var(--on-surface); font: inherit; }
+textarea { min-height: 120px; resize: vertical; }
+textarea[aria-invalid=true] { border-color: var(--error); }
+.page-heading, .actions, .pagination { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.page-heading { justify-content: space-between; margin-bottom: var(--space-3); }
+.filters { display: flex; gap: var(--space-2); align-items: end; flex-wrap: wrap; }
+.filters .form-field { flex: 1 1 180px; margin-bottom: 0; }
+.table-scroll { overflow-x: auto; margin: var(--space-3) 0; border: 1px solid var(--card-border); border-radius: var(--radius-default); }
+table { border-collapse: collapse; width: 100%; background: var(--surface-container-lowest); font-variant-numeric: tabular-nums; }
+th, td { padding: var(--space-2); text-align: left; border-bottom: 1px solid var(--card-border); }
+th { font: var(--label-md); color: var(--on-surface-variant); }
+.badge { display: inline-block; padding: var(--space-1); border-radius: var(--radius-default); background: var(--surface-container); color: var(--on-surface-variant); font: var(--body-sm); }
+.modal-overlay { position: fixed; inset: 0; z-index: 20; background: color-mix(in srgb, var(--inverse-surface) 35%, transparent); display: grid; place-items: center; padding: var(--space-2); }
+.modal-panel { width: min(100%, 600px); max-height: calc(100dvh - var(--space-4)); overflow: auto; padding: var(--space-4); background: var(--surface-container-lowest); border: 1px solid var(--card-border); border-radius: var(--radius-lg); }
+.pagination { margin-top: var(--space-3); }
+@media (max-width: 639px) { .app-header nav { flex-wrap: wrap; } .modal-panel { padding: var(--space-2); } }

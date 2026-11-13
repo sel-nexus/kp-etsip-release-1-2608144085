@@ -3,6 +3,8 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useSession } from './features/auth/SessionProvider';
 import ProfilePage from './features/profile/ProfilePage';
 import LoginPage from './features/auth/LoginPage';
+import PortfolioList from './features/portfolios/PortfolioList';
+import PortfolioDetailPage from './features/portfolios/PortfolioDetailPage';
 import { AppLayout } from './components/AppLayout';
 import { Button } from './components/Button';
 /** Guard the shell while restored credentials are checked against the backend. */
@@ -25,6 +27,16 @@ export function AppRoutes() {
       <Route path="/profile" element={session.user ? session.user.mustChangePassword ? <Navigate to="/" replace /> : (
         <AppLayout>
           <ProfilePage />
+        </AppLayout>
+      ) : <Navigate to="/login" replace />} />
+      <Route path="/portfolios" element={session.user ? (
+        <AppLayout>
+          <PortfolioList />
+        </AppLayout>
+      ) : <Navigate to="/login" replace />} />
+      <Route path="/portfolios/:id" element={session.user ? (
+        <AppLayout>
+          <PortfolioDetailPage />
         </AppLayout>
       ) : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />

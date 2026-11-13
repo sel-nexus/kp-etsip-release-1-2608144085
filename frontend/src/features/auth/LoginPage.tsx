@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
+import { landingPath } from '../profile/profileApi';
 import { useSession } from './SessionProvider';
 import { useRequest } from '../../lib/useRequest';
 import { Button } from '../../components/Button';
@@ -14,7 +15,9 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fields, setFields] = useState<Record<string, string>>({});
-  if (session.user) return <Navigate to={session.user.mustChangePassword ? '/' : session.user.defaultLandingPage === 'profile' ? '/profile' : '/'} replace />;
+  if (session.user) {
+    return <Navigate to={session.user.mustChangePassword ? '/' : landingPath(session.user.defaultLandingPage)} replace />;
+  }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const errors: Record<string, string> = {};

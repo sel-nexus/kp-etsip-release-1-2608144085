@@ -8,6 +8,12 @@ async def create_indexes(database: AsyncDatabase) -> None:
     """Block initialization if required unique or audit indexes cannot be built."""
     await database.users.create_index('email', unique=True)
     await database.roles.create_index('name', unique=True)
+    await database.portfolios.create_index('name', unique=True)
+    await database.portfolios.create_index([('status', 1), ('productArea', 1)])
+    await database.applications.create_index('name', unique=True)
+    await database.applications.create_index([('portfolioId', 1), ('lifecycleStatus', 1)])
+    await database.applications.create_index([('portfolioId', 1), ('criticality', 1), ('riskLevel', 1)])
+    await database.applications.create_index([('portfolioId', 1), ('productArea', 1)])
     await database.audit_logs.create_index([('timestamp', -1)])
     await database.audit_logs.create_index([('userId', 1), ('timestamp', -1)])
     await database.audit_logs.create_index([('action', 1), ('timestamp', -1)])

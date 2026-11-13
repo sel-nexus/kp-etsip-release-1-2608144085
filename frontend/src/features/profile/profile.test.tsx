@@ -32,7 +32,7 @@ describe('Profile and first-password gate', () => {
     expect(await screen.findByText(identity.name)).toBeVisible();
     expect(screen.getByText(identity.email)).toBeVisible();
     expect(screen.getByText('No portfolio access')).toBeVisible();
-    expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/', '/', '/profile']);
+    expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/', '/', '/profile', '/portfolios']);
     expect(screen.queryByRole('option', { name: 'Users' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Audit' })).not.toBeInTheDocument();
   });
