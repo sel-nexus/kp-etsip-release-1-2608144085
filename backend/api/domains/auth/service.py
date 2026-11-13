@@ -42,8 +42,10 @@ class AuthService:
             await self.principal_for_user(user)
         except Unauthenticated:
             # Unknown attempts have an opaque event actor, never an invented persisted account.
+            actor_id = user.get('_id') if user else None
+            actor_name = user.get('name') or 'Incomplete account' if user else 'Unknown account'
             try:
-                await self.audit.record(user['_id'] if user else None, user['name'] if user else 'Unknown account', 'login', 'user', user['_id'] if user else None, 'Sign-in failed')
+                await self.audit.record(actor_id, actor_name, 'login', 'user', actor_id, 'Sign-in failed')
             except DomainError as exc:
                 if exc.code != 'AUDIT_WRITE_FAILED':
                     raise

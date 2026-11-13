@@ -1,9 +1,6 @@
 """Exercise every users endpoint with live identities and real Mongo persistence."""
 import pytest
 from bson import ObjectId
-from unittest.mock import patch
-from pymongo.errors import AutoReconnect
-from api.core.audit import AuditService
 from api.core.security import create_access_token, verify_password
 from api.core.policy import ROLE_MAXIMUM
 from tests.test_users_unit import payload, parent
@@ -70,7 +67,7 @@ async def test_each_missing_create_field_rejects_without_mutation(client, db, ad
     assert response.status_code == 422 and response.json()['error']['code'] == 'VALIDATION_ERROR'
     assert await db.users.count_documents({}) == 1
 
-@pytest.mark.parametrize('field,value', [('name',''),('name',1),('name','x'*201),('email','bad'),('email',{'$ne':None}),('role','Custom'),('status','Archived'),('portfolioAccess',['bad']),('portfolioAccess',[123456789012345678901234]),('portfolioAccess',None),('portfolioAccess',[str(ObjectId())]),('vendorIndicator','false'),('password',''),('password','é'*37),('passwordHash','secret'),('mustChangePassword',True),('authSource','sso')])
+@pytest.mark.parametrize('field,value', [('name',''),('name',1),('name','x'*201),('email','bad'),('email',{'$ne':None}),('role','Custom'),('status','Archived'),('portfolioAccess',['bad']),('portfolioAccess',[123456789012345678901234]),('portfolioAccess',None),('portfolioAccess',[str(ObjectId())]),('vendorIndicator','false'),('password',''),('password',None),('password',123),('password',{'$ne':None}),('password','test\x00secret'),('password','a'*73),('password','é'*36+'a'),('password','é'*37),('passwordHash','secret'),('mustChangePassword',True),('authSource','sso')])
 async def test_invalid_body_fields_do_not_mutate(client, db, admin, field, value):
     before = await db.users.find_one({})
     response = await client.post('/api/users', headers=admin, json={**payload(), field:value})
@@ -80,6 +77,38 @@ async def test_invalid_body_fields_do_not_mutate(client, db, admin, field, value
         response = await client.put('/api/users/'+str(before['_id']), headers=admin, json={field:value})
         assert response.status_code == 422
         assert await db.users.find_one({}) == before
+
+@pytest.mark.parametrize('password', ['a', 'a'*71, 'a'*72, 'é'*35+'a', 'é'*36])
+async def test_valid_credential_byte_boundaries_persist_hash_only(client, db, admin, password):
+    """Accept nonempty bcrypt-safe credentials without adding complexity requirements."""
+    response = await client.post('/api/users', headers=admin, json={**payload(), 'password': password})
+    assert response.status_code == 201
+    stored = await db.users.find_one({'_id': ObjectId(response.json()['id'])})
+    assert await verify_password(password, stored['passwordHash'])
+    assert 'password' not in stored and 'passwordHash' not in response.json()
+    assert await db.users.count_documents({}) == 2
+
+
+@pytest.mark.parametrize('text', ['<script>window.usersXss=1</script>', '<img src=x onerror="window.usersXss=1">'])
+async def test_markup_account_text_is_stored_and_searched_literally(client, db, admin, text):
+    """Preserve intentional text; neither interpret markup nor invent sanitization."""
+    response = await client.post('/api/users', headers=admin, json={**payload(), 'name': text, 'managerName': text})
+    assert response.status_code == 201
+    identifier = ObjectId(response.json()['id'])
+    stored = await db.users.find_one({'_id': identifier})
+    assert stored['name'] == text and stored['managerName'] == text
+    assert response.json()['name'] == text and response.json()['managerName'] == text
+    search = await client.get('/api/users', headers=admin, params={'search': text})
+    assert search.status_code == 200 and search.json()['total'] == 1
+    assert search.json()['items'][0]['id'] == str(identifier)
+    detail = await client.get('/api/users/'+str(identifier), headers=admin)
+    assert detail.json()['name'] == text
+    updated_text = 'Updated ' + text
+    response = await client.put('/api/users/'+str(identifier), headers=admin, json={'name': updated_text})
+    assert response.status_code == 200 and response.json()['name'] == updated_text
+    assert (await db.users.find_one({'_id': identifier}))['name'] == updated_text
+    assert await db.users.count_documents({}) == 2
+
 
 @pytest.mark.parametrize('body', [{},{'password':'reset'},{'name':None},{'portfolioAccess':None},{'name':'Edit','expectedUpdatedAt':123},{'name':'Edit','expectedUpdatedAt':'2026-01-01T00:00:00'},{'expectedUpdatedAt':'2026-01-01T00:00:00Z'}])
 async def test_invalid_partial_edits(client, db, admin, body):
@@ -129,29 +158,19 @@ async def test_missing_accounts_and_unauthenticated_calls(client, admin, method,
 
 @pytest.mark.parametrize('operation', ['create', 'update', 'delete'])
 async def test_required_audit_failure_returns_503_with_persisted_partial_write(client, db, admin, operation):
-    # Fail only audit acknowledgement; account persistence remains real Mongo.
+    """Reject audit inserts in this disposable database, then requery partial writes."""
     if operation != 'create':
         created = await client.post('/api/users', headers=admin, json=payload())
         assert created.status_code == 201
         identifier = created.json()['id']
-    audit = AuditService(db)
-    async def failure(document):
-        raise AutoReconnect('test audit outage')
-    from api.domains.users.router import get_service
-    from api.domains.users.repository import UserRepository
-    from api.domains.users.service import UserService
-    with patch.object(audit.collection, 'insert_one', failure):
-        client_app = client._transport.app
-        client_app.dependency_overrides[get_service] = lambda: UserService(UserRepository(db), audit)
-        try:
-            if operation == 'create':
-                response = await client.post('/api/users', headers=admin, json=payload())
-            elif operation == 'update':
-                response = await client.put('/api/users/' + identifier, headers=admin, json={'name': 'Persisted edit'})
-            else:
-                response = await client.delete('/api/users/' + identifier, headers=admin)
-        finally:
-            client_app.dependency_overrides.clear()
+    await db.command('collMod', 'audit_logs', validator={'$jsonSchema': {'required': ['rejectTestWrites']}},
+        validationLevel='strict', validationAction='error')
+    if operation == 'create':
+        response = await client.post('/api/users', headers=admin, json=payload())
+    elif operation == 'update':
+        response = await client.put('/api/users/' + identifier, headers=admin, json={'name': 'Persisted edit'})
+    else:
+        response = await client.delete('/api/users/' + identifier, headers=admin)
     assert response.status_code == 503 and response.json()['error']['code'] == 'AUDIT_WRITE_FAILED'
     assert response.headers['X-Correlation-ID']
     stored = await db.users.find_one({'email': 'account@example.com'})

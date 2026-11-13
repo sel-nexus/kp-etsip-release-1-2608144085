@@ -1,5 +1,5 @@
 """Exercise application validation and durable service transitions against real Mongo."""
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import asyncio
 import pytest
 from bson import ObjectId
@@ -122,3 +122,116 @@ async def test_conditional_repository_write_rejects_changed_and_deleted_snapshot
     current = await repo.get(Scope(None), ObjectId(created.id))
     assert await repo.delete(Scope(None), current)
     assert await repo.update(Scope(None), current, {'qualityScore': 0}) is None
+
+
+@pytest.mark.parametrize('competing_write', ['changed', 'deleted'])
+async def test_service_update_interleaved_snapshot_conflict_or_missing_releases_pins(db, monkeypatch, competing_write):
+    """Run a real competing Mongo write before the original conditional update."""
+    first, second = await parent(db), await parent(db, 'Destination')
+    repo = ApplicationRepository(db)
+    service = ApplicationService(repo, AuditService(db))
+    principal = actor()
+    created = await service.create(principal, ApplicationCreate.model_validate(payload(first)))
+    identifier = ObjectId(created.id)
+    original_update = repo.update
+
+    async def interleaved_update(scope, snapshot, changes):
+        """Keep Mongo as the arbiter instead of manufacturing a repository result."""
+        for parent_id in (first, second):
+            assert (await db.portfolios.find_one({'_id': parent_id}))['_applicationReservations']
+        if competing_write == 'changed':
+            result = await db.applications.update_one({'_id': identifier}, {'$set': {
+                'qualityScore': 91, 'updatedAt': snapshot['updatedAt'] + timedelta(seconds=1),
+            }})
+            assert result.modified_count == 1
+        else:
+            assert (await db.applications.delete_one({'_id': identifier})).deleted_count == 1
+        return await original_update(scope, snapshot, changes)
+
+    monkeypatch.setattr(repo, 'update', interleaved_update)
+    with pytest.raises(DomainError) as failure:
+        await service.update(principal, identifier, ApplicationUpdate(portfolioId=str(second), qualityScore=0))
+    assert failure.value.status == (409 if competing_write == 'changed' else 404)
+    assert failure.value.code == ('CONFLICT' if competing_write == 'changed' else 'NOT_FOUND')
+    stored = await db.applications.find_one({'_id': identifier})
+    if competing_write == 'changed':
+        assert stored['qualityScore'] == 91 and stored['portfolioId'] == first
+    else:
+        assert stored is None
+    for parent_id in (first, second):
+        assert (await db.portfolios.find_one({'_id': parent_id}))['_applicationReservations'] == []
+    assert await db.audit_logs.count_documents({'entityId': identifier}) == 1
+
+
+@pytest.mark.parametrize('competing_write', ['changed', 'deleted'])
+async def test_service_delete_interleaved_snapshot_conflict_or_missing_preserves_winner(db, competing_write):
+    """Execute the real conditional delete after a competing persisted mutation."""
+    parent_id = await parent(db)
+    principal = actor()
+
+    class InterleavedRepository(ApplicationRepository):
+        """Interleave real Mongo writes without substituting repository outcomes."""
+        async def delete(self, scope, snapshot):
+            """Persist the winner before running the original conditional delete."""
+            if competing_write == 'changed':
+                result = await self.applications.update_one({'_id': snapshot['_id']}, {'$set': {
+                    'qualityScore': 91, 'updatedAt': snapshot['updatedAt'] + timedelta(seconds=1),
+                }})
+                assert result.modified_count == 1
+            else:
+                assert (await self.applications.delete_one({'_id': snapshot['_id']})).deleted_count == 1
+            deleted = await super().delete(scope, snapshot)
+            assert deleted is False
+            return deleted
+
+    service = ApplicationService(InterleavedRepository(db), AuditService(db))
+    created = await service.create(principal, ApplicationCreate.model_validate(payload(parent_id)))
+    identifier = ObjectId(created.id)
+    before = await db.applications.find_one({'_id': identifier})
+    events_before = await db.audit_logs.find({'entityId': identifier}).to_list(None)
+    assert len(events_before) == 1 and events_before[0]['action'] == 'create'
+    with pytest.raises(DomainError) as failure:
+        await service.delete(principal, identifier, expected=before['updatedAt'])
+    assert failure.value.status == (409 if competing_write == 'changed' else 404)
+    assert failure.value.code == ('CONFLICT' if competing_write == 'changed' else 'NOT_FOUND')
+    assert failure.value.message == ('Application changed. Reload and try again.' if competing_write == 'changed' else 'Application not found')
+    stored = await db.applications.find_one({'_id': identifier})
+    if competing_write == 'changed':
+        assert stored == {**before, 'qualityScore': 91, 'updatedAt': before['updatedAt'] + timedelta(seconds=1)}
+    else:
+        assert stored is None
+    assert (await db.portfolios.find_one({'_id': parent_id}))['_applicationReservations'] == []
+    assert await db.audit_logs.find({'entityId': identifier}).to_list(None) == events_before
+    assert await db.audit_logs.count_documents({'entityId': identifier, 'action': 'delete'}) == 0
+
+
+async def test_service_update_failed_second_parent_reservation_cleans_first_pin(db, monkeypatch):
+    """Set real destination delete intent after the first pin, then attempt real reserve."""
+    first, second = await parent(db), await parent(db, 'Destination')
+    assert str(first) < str(second)
+    repo = ApplicationRepository(db)
+    service = ApplicationService(repo, AuditService(db))
+    principal = actor()
+    created = await service.create(principal, ApplicationCreate.model_validate(payload(first)))
+    identifier = ObjectId(created.id)
+    before = await db.applications.find_one({'_id': identifier})
+    original_reserve = repo.reserve
+
+    async def interleaved_reserve(scope, parent_id, token):
+        """Make the second atomic predicate genuinely fail in Mongo."""
+        if parent_id == second:
+            assert token in (await db.portfolios.find_one({'_id': first}))['_applicationReservations']
+            result = await db.portfolios.update_one({'_id': second}, {'$set': {'_applicationDeleting': True}})
+            assert result.modified_count == 1
+        return await original_reserve(scope, parent_id, token)
+
+    monkeypatch.setattr(repo, 'reserve', interleaved_reserve)
+    with pytest.raises(DomainError) as failure:
+        await service.update(principal, identifier, ApplicationUpdate(portfolioId=str(second)))
+    assert failure.value.status == 404 and failure.value.code == 'NOT_FOUND'
+    assert await db.applications.find_one({'_id': identifier}) == before
+    assert (await db.portfolios.find_one({'_id': first}))['_applicationReservations'] == []
+    destination = await db.portfolios.find_one({'_id': second})
+    assert destination['_applicationDeleting'] is True
+    assert not destination.get('_applicationReservations', [])
+    assert await db.audit_logs.count_documents({'entityId': identifier}) == 1

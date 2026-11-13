@@ -4,13 +4,80 @@ import { hash } from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { loadEnv } from 'vite';
 import { fileURLToPath } from 'node:url';
-import { test, expect } from './fixtures';
+import { test, expect, navigateShell } from './fixtures';
 const env = loadEnv('development', fileURLToPath(new URL('../', import.meta.url)), '');
 const apiURL = process.env.E2E_API_URL || env.E2E_API_URL;
 
 test.describe('Bounded role administration', () => {
   test.use({ identityOptions: { role: 'Administrator', mustChangePassword: false }, expectedHttpErrors: [401, 409] });
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
+    test(`ensures a missing Executive baseline exactly once at ${viewport.width}px`, async ({ page, request, identity, browserErrors }) => {
+      const databaseName = process.env.E2E_MONGODB_DB || env.E2E_MONGODB_DB;
+      if (!databaseName?.startsWith('etsip_e2e_')) throw new Error('Use a disposable etsip_e2e_ database');
+      const mongo = new MongoClient(process.env.E2E_MONGODB_URI || env.E2E_MONGODB_URI);
+      await mongo.connect();
+      const db = mongo.db(databaseName);
+      const original = await db.collection('roles').findOne({ name: 'Executive' });
+      // The suite is single-worker; preserve this shared baseline only in its isolated DB.
+      try {
+        await db.collection('roles').deleteOne({ name: 'Executive' });
+        expect(await db.collection('roles').countDocuments({ name: 'Executive' })).toBe(0);
+        await page.setViewportSize(viewport);
+        await page.goto('/roles'); // Sole entry; baseline creation uses the admin UI.
+        await page.getByLabel('Email').fill(identity.email);
+        await page.getByLabel('Password', { exact: true }).fill(identity.password);
+        const loginResponse = page.waitForResponse(response => response.url().endsWith('/api/auth/login'));
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+        const login = await loginResponse; expect(login.status()).toBe(200);
+        const headers = { Authorization: `Bearer ${(await login.json()).token}` };
+        const listResponse = page.waitForResponse(response => response.url().endsWith('/api/roles') && response.request().method() === 'GET');
+        await navigateShell(page, 'Roles');
+        const listed = await listResponse; expect(listed.status()).toBe(200);
+        expect((await listed.json()).items.some((role: { name: string }) => role.name === 'Executive')).toBe(false);
+        const setup = page.getByRole('region', { name: 'Executive setup', exact: true });
+        await expect(setup).toContainText('Baseline role is missing. Maximum allowed: view, export.');
+        await expect(page.getByRole('form', { name: 'Executive permissions', exact: true })).toHaveCount(0);
+        const ensureResponse = page.waitForResponse(response => response.url().endsWith('/api/roles') && response.request().method() === 'POST');
+        await setup.getByRole('button', { name: 'Ensure Executive baseline', exact: true }).click();
+        const ensured = await ensureResponse; expect(ensured.status()).toBe(200);
+        expect(ensured.request().postDataJSON()).toEqual({ name: 'Executive' });
+        const role = await ensured.json();
+        expect(role).toMatchObject({ name: 'Executive', description: 'Enterprise read and export', permissions: ['export', 'view'] });
+        const editor = page.getByRole('form', { name: 'Executive permissions', exact: true });
+        await expect(editor).toBeVisible();
+        await expect(editor).toContainText('Maximum allowed: view, export.');
+        await expect(editor.getByRole('checkbox')).toHaveCount(2);
+        for (const permission of ['view', 'export']) await expect(editor.getByRole('checkbox', { name: permission, exact: true })).toBeChecked();
+        await expect(setup).toHaveCount(0);
+        await expect(page.getByText('Executive baseline ensured', { exact: true })).toBeVisible();
+        const stored = await db.collection('roles').findOne({ name: 'Executive' });
+        expect(stored?._id.toHexString()).toBe(role.id);
+        expect(stored?.permissions).toEqual(['export', 'view']);
+        expect(stored?.description).toBe(role.description);
+        expect(stored?.createdAt.toISOString()).toBe(new Date(role.createdAt).toISOString());
+        expect(stored?.updatedAt.toISOString()).toBe(new Date(role.updatedAt).toISOString());
+        const auditQuery = { userId: new ObjectId(identity.id), entityType: 'role', action: 'create' };
+        const events = await db.collection('audit_logs').find(auditQuery).toArray();
+        expect(events).toHaveLength(1);
+        expect(events[0].entityId).toEqual(new ObjectId(role.id));
+        expect(events[0].details).toBe('Ensured supported role');
+        const repeated = await request.post(`${apiURL}/api/roles`, { headers, data: { name: 'Executive' } });
+        expect(repeated.status()).toBe(200);
+        expect(await repeated.json()).toEqual(role);
+        expect(await db.collection('roles').countDocuments({ name: 'Executive' })).toBe(1);
+        expect(await db.collection('roles').findOne({ name: 'Executive' })).toEqual(stored);
+        expect(await db.collection('audit_logs').countDocuments(auditQuery)).toBe(1);
+        await navigateShell(page, 'Session');
+        await navigateShell(page, 'Roles');
+        await expect(editor.getByRole('checkbox', { name: 'export', exact: true })).toBeChecked();
+        expect(browserErrors).toEqual([]);
+      } finally {
+        try {
+          await db.collection('roles').deleteOne({ name: 'Executive' });
+          if (original) await db.collection('roles').insertOne(original);
+        } finally { await mongo.close(); }
+      }
+    });
     test(`edits restores and enforces existing Engineer token at ${viewport.width}px`, async ({ page, request, identity, browserErrors }) => {
       const databaseName = process.env.E2E_MONGODB_DB || env.E2E_MONGODB_DB;
       if (!databaseName?.startsWith('etsip_e2e_')) throw new Error('Use a disposable etsip_e2e_ database');
@@ -52,7 +119,7 @@ test.describe('Bounded role administration', () => {
         const loggedIn = await loginResponse; expect(loggedIn.status()).toBe(200);
         const adminHeaders = { Authorization: `Bearer ${(await loggedIn.json()).token}` };
         const listResponse = page.waitForResponse((response) => response.url().endsWith('/api/roles') && response.request().method() === 'GET');
-        await page.getByRole('link', { name: 'Roles', exact: true }).click();
+        await navigateShell(page, 'Roles');
         const listed = await listResponse; expect(listed.status()).toBe(200);
         const role = (await listed.json()).items.find((item: { name: string }) => item.name === 'Engineer');
         const form = page.getByRole('form', { name: 'Engineer permissions', exact: true });
@@ -87,8 +154,8 @@ test.describe('Bounded role administration', () => {
         expect(new Set((await db.collection('roles').findOne({ _id: new ObjectId(role.id) }))?.permissions)).toEqual(new Set(['view','create','edit','export']));
         expect((await request.put(applicationURL, { headers: engineerHeaders, data: { qualityScore: 83 } })).status()).toBe(200);
         expect((await db.collection('applications').findOne({ _id: applicationId }))?.qualityScore).toBe(83);
-        await page.getByRole('link', { name: 'Session', exact: true }).click();
-        await page.getByRole('link', { name: 'Roles', exact: true }).click();
+        await navigateShell(page, 'Session');
+        await navigateShell(page, 'Roles');
         await expect(form.getByRole('checkbox', { name: 'edit', exact: true })).toBeChecked();
         await page.screenshot({ path: test.info().outputPath('roles.png') });
         expect(browserErrors).toEqual([]);

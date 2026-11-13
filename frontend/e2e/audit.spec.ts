@@ -1,6 +1,6 @@
 /** Verify the auditor journey against live HTTP, downloaded CSV and persisted Mongo evidence. */
 import { readFile } from 'node:fs/promises';
-import { test, expect } from './fixtures';
+import { test, expect, navigateShell } from './fixtures';
 import type { AuditRow, Page } from '../src/types';
 
 /** Parse quoted CSV independently, including escaped quotes and embedded line breaks. */
@@ -37,14 +37,14 @@ test.describe('Auditor history', () => {
       expect(login.status()).toBe(200);
       const session = await login.json();
       expect(session.user.id).toBe(identity.id);
-      await page.getByRole('link', { name: 'My profile', exact: true }).click();
+      await navigateShell(page, 'My profile');
       await page.getByLabel('Default landing page').selectOption('audit');
       const preferenceResponse = page.waitForResponse((response) => response.url().endsWith('/api/auth/preferences'));
       await page.getByRole('button', { name: 'Save preference' }).click();
       expect((await preferenceResponse).status()).toBe(200);
       await expect(page.getByText('Preference saved', { exact: true })).toBeVisible();
       const historyResponse = page.waitForResponse((response) => response.url().includes('/api/audit-logs'));
-      await page.getByRole('link', { name: 'Audit history', exact: true }).click();
+      await navigateShell(page, 'Audit history');
       expect((await historyResponse).status()).toBe(200);
       await page.getByLabel('User ID', { exact: true }).fill(identity.id);
       const from = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -92,8 +92,8 @@ test.describe('Auditor history', () => {
       })));
       await identity.verifyAudit(all.items, result.total);
       await expect(page.getByText('CSV download started')).toBeVisible();
-      await page.getByRole('link', { name: 'My profile', exact: true }).click();
-      await page.getByRole('link', { name: 'Audit history', exact: true }).click();
+      await navigateShell(page, 'My profile');
+      await navigateShell(page, 'Audit history');
       await page.getByLabel('User ID', { exact: true }).fill(identity.id);
       await page.getByLabel('Action', { exact: true }).selectOption('delete');
       await page.getByRole('button', { name: 'Apply filters' }).click();

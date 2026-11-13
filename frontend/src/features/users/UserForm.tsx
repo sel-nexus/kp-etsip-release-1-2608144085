@@ -84,7 +84,9 @@ export function UserForm({ account, onSaved, onCancel, onBusy }: UserFormProps) 
         </div>
         <fieldset aria-describedby="assignment-help">
           <legend>Portfolio access</legend>
-          <p id="assignment-help" className="muted">Empty access means all portfolios only for Administrator, Executive and Auditor; other roles see no inventory.</p>
+          <p id="assignment-help" className="muted">
+            Empty access means all portfolios only for Administrator, Executive and Auditor; other roles see no inventory.
+          </p>
           {loading && <p role="status">Loading available portfolios…</p>}
           {portfolioError && (
             <div>

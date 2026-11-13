@@ -32,6 +32,9 @@ export function ApplicationForm({ application, onSaved, onCancel }: ApplicationF
       let total = 0;
       do {
         const response = await portfolioApi.list(new URLSearchParams({ page: String(page), pageSize: '100' }));
+        if (response.items.length === 0 && result.length < response.total) {
+          throw new Error('Portfolio inventory changed. Retry loading portfolios.');
+        }
         result.push(...response.items); total = response.total; page += 1;
       } while (result.length < total);
       return result;

@@ -98,10 +98,15 @@ export default function PortfolioReportPage() {
       {!loading && data && (
         <>
           {!data.items.length ? <p role="status">No portfolios match your scope and filters.</p> : (
-            <DataTable<PortfolioReportRow> caption="Portfolio report" rows={data.items} rowKey={(item) => item.id} columns={portfolioColumns.map((column) => ({
-              key: column, label: column,
-              render: (item) => column === 'name' ? <Link to={`/portfolios/${item.id}`}>{item.name}</Link> : item[column] ?? '—',
-            }))} />
+            <DataTable<PortfolioReportRow>
+              caption="Portfolio report"
+              rows={data.items}
+              rowKey={(item) => item.id}
+              columns={portfolioColumns.map((column) => ({
+                key: column, label: column,
+                render: (item) => column === 'name' ? <Link to={`/portfolios/${item.id}`}>{item.name}</Link> : item[column] ?? '—',
+              }))}
+            />
           )}
           <Pagination page={data.page} pageSize={data.pageSize} total={data.total} onPage={(page) => {
             const next = new URLSearchParams(query); next.set('page', String(page)); setQuery(next);

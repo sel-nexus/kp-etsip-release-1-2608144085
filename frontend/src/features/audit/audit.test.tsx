@@ -1,7 +1,7 @@
 /** Exercise real audit client decoding, URL state and role-only navigation. */
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { SessionProvider } from '../auth/SessionProvider';
 import { AppRoutes } from '../../routes';
@@ -15,6 +15,33 @@ const row: AuditRow = { id: '65b500000000000000000001', timestamp: '2026-01-01T0
   userName: 'Unknown account', action: 'login', entityType: 'user', entityId: null, details: 'Sign-in failed' };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const page = (items = [row], current = 1, total = 11) => ({ items, page: current, pageSize: 10, total });
+
+const originalURL = URL;
+const originalCreate = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+const originalRevoke = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+const originalClick = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'click');
+
+beforeEach(() => {
+  expect(URL).toBe(originalURL);
+  expect(Object.getOwnPropertyDescriptor(URL, 'createObjectURL')).toEqual(originalCreate);
+  expect(Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL')).toEqual(originalRevoke);
+  expect(Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'click')).toEqual(originalClick);
+});
+
+/** Replace browser download methods without changing the original URL constructor. */
+function mockDownloadBrowser() {
+  const create = vi.fn((_blob: Blob) => 'blob:audit');
+  const revoke = vi.fn();
+  class DownloadURL extends URL {
+    static createObjectURL = create;
+    static revokeObjectURL = revoke;
+  }
+  vi.stubGlobal('URL', DownloadURL);
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    expect(this.isConnected).toBe(true);
+  });
+  return { create, revoke, click };
+}
 
 /** Mount the actual session/router/client with only the network boundary mocked. */
 function mount(user = auditor, entry = '/audit', response = json(page())) {
@@ -89,13 +116,10 @@ describe('Audit history', () => {
     expect(await screen.findByRole('table')).toBeVisible();
   });
   it('starts real blob download with matching filters and shows pending/success feedback', async () => {
+    const { create, revoke, click } = mockDownloadBrowser();
     const fetch = mount(auditor, '/audit?action=edit&page=2&pageSize=10');
     await screen.findByRole('table');
-    const create = vi.fn((_blob: Blob) => 'blob:audit');
-    const revoke = vi.fn();
-    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke }));
-    let anchor: HTMLAnchorElement | null = null;
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { anchor = this; });
+
     let done!: (value: Response) => void;
     fetch.mockImplementationOnce(() => new Promise((resolve) => { done = resolve; }));
     await userEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
@@ -105,13 +129,22 @@ describe('Audit history', () => {
     expect(new Headers(fetch.mock.calls[2][1]?.headers).get('Authorization')).toBe('Bearer audit-token');
     await act(async () => done(new Response('timestamp,userId\r\n', { headers: { 'Content-Type': 'text/csv; charset=utf-8' } })));
     expect(await screen.findByText('CSV download started')).toBeVisible();
-    expect(create.mock.calls[0][0]).toBeInstanceOf(Blob);
-    expect(anchor!.download).toBe('audit-history.csv');
-    expect(anchor!.getAttribute('href')).toBe('blob:audit');
-    expect(document.querySelector('a[download]')).toBeNull();
     await waitFor(() => expect(revoke).toHaveBeenCalledWith('blob:audit'), { timeout: 2000 });
+    expect(revoke).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(1);
+    const blob = create.mock.calls[0][0];
+    expect(blob).toBeInstanceOf(Blob);
+    expect(blob.type).toBe('text/csv;charset=utf-8');
+    expect(blob.size).toBe(new TextEncoder().encode('timestamp,userId\r\n').length);
+    expect(click).toHaveBeenCalledTimes(1);
+    const anchor = click.mock.instances[0] as HTMLAnchorElement;
+    expect(anchor.download).toBe('audit-history.csv');
+    expect(anchor.getAttribute('href')).toBe('blob:audit');
+    expect(anchor.isConnected).toBe(false);
+    expect(document.querySelector('a[download]')).toBeNull();
   });
   it.each([403,503])('shows export failure %s without claiming download and allows retry', async (status) => {
+    const { create, revoke, click } = mockDownloadBrowser();
     const fetch = mount();
     await screen.findByRole('table');
     fetch.mockResolvedValueOnce(json({ error: { message: 'Export unavailable' } }, status));
@@ -119,6 +152,10 @@ describe('Audit history', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Export unavailable');
     expect(screen.queryByText('CSV download started')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeEnabled();
+    expect(create).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+    expect(revoke).not.toHaveBeenCalled();
+    expect(document.querySelector('a[download]')).toBeNull();
   });
   it('routes the completed audit landing preference through login entry', async () => {
     mount({ ...auditor, defaultLandingPage: 'audit' }, '/login');
@@ -126,19 +163,29 @@ describe('Audit history', () => {
     expect(screen.getByRole('heading', { name: 'Audit history' })).toBeVisible();
   });
   it('clears invalid session when CSV export returns 401', async () => {
+    const { create, revoke, click } = mockDownloadBrowser();
     const fetch = mount();
     await screen.findByRole('table');
     fetch.mockResolvedValueOnce(json({ error: { message: 'Unable to authenticate' } }, 401));
     await userEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeVisible();
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(create).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+    expect(revoke).not.toHaveBeenCalled();
+    expect(document.querySelector('a[download]')).toBeNull();
   });
   it('rejects network failure, malformed errors and successful non-CSV responses', async () => {
+    const { create, revoke, click } = mockDownloadBrowser();
     const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('network'));
     await expect(auditApi.download(new URLSearchParams())).rejects.toThrow('Unable to reach the service');
     fetch.mockResolvedValueOnce(new Response('not json', { status: 503 }));
     await expect(auditApi.download(new URLSearchParams())).rejects.toThrow('Export failed');
     fetch.mockResolvedValueOnce(json({ items: [] }));
     await expect(auditApi.download(new URLSearchParams())).rejects.toThrow('did not return CSV');
+    expect(create).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+    expect(revoke).not.toHaveBeenCalled();
+    expect(document.querySelector('a[download]')).toBeNull();
   });
 });

@@ -7,6 +7,7 @@ import { SessionProvider } from '../auth/SessionProvider';
 import { AppRoutes } from '../../routes';
 import { TOKEN_KEY } from '../../lib/api';
 import { applicationLabels } from './applicationApi';
+import { ApplicationForm } from './ApplicationForm';
 import type { ApplicationDetail, SafeUser, Portfolio } from '../../types';
 const portfolio: Portfolio = {
   id: '65b100000000000000000001', name: 'Payments', description: 'Services', ownerName: 'Owner', productArea: 'Payments',
@@ -46,6 +47,116 @@ async function fill() {
   await userEvent.selectOptions(screen.getByLabelText('Portfolio', { exact: true }), portfolio.id);
 }
 describe('Applications', () => {
+  it('loads every parent page before enabling an edit and saves the later-page selection', async () => {
+    const later = { ...portfolio, id: '65b100000000000000000002', name: 'Later portfolio' };
+    let done!: (response: Response) => void;
+    const fetch = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json({ ...page([portfolio], 2), pageSize: 100 }))
+      .mockImplementationOnce(() => new Promise((resolve) => { done = resolve; }));
+    const saved = vi.fn();
+    render(<ApplicationForm application={application} onSaved={saved} onCancel={vi.fn()} />);
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('Loading portfolio choices…')).toBeVisible();
+    expect(screen.getByLabelText('Portfolio', { exact: true })).toBeDisabled();
+    const save = screen.getByRole('button', { name: 'Save application' });
+    expect(save).toBeDisabled();
+    await userEvent.click(save);
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'PUT' || init?.method === 'POST')).toEqual([]);
+    expect(saved).not.toHaveBeenCalled();
+    await act(async () => done(json({ ...page([later], 2, 2), pageSize: 100 })));
+    expect(screen.queryByText('Loading portfolio choices…')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('option').filter((option) => option.parentElement?.id === 'application-portfolioId')
+      .map((option) => option.textContent)).toEqual(['Choose a portfolio', 'Payments', 'Later portfolio']);
+    expect(fetch.mock.calls.map(([url]) => new URL(String(url), 'http://test').search)).toEqual([
+      '?page=1&pageSize=100', '?page=2&pageSize=100',
+    ]);
+    expect(save).toBeEnabled();
+    await userEvent.selectOptions(screen.getByLabelText('Portfolio', { exact: true }), later.id);
+    const updated = { ...application, portfolioId: later.id };
+    fetch.mockResolvedValueOnce(json(updated));
+    await userEvent.click(save);
+    await waitFor(() => expect(saved).toHaveBeenCalledWith(updated));
+    expect(fetch.mock.calls[2][1]?.method).toBe('PUT');
+    expect(JSON.parse(fetch.mock.calls[2][1]?.body as string)).toMatchObject({ portfolioId: later.id, expectedUpdatedAt: application.updatedAt });
+  });
+  it.each(['service failure', 'inconsistent empty page'])('blocks application writes after a later parent %s and recovers from page one', async (failure) => {
+    const message = failure === 'service failure' ? 'Portfolio unavailable' : 'Portfolio inventory changed. Retry loading portfolios.';
+    const fetch = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json({ ...page([portfolio], 2), pageSize: 100 }))
+      .mockResolvedValueOnce(failure === 'service failure'
+        ? json({ error: { message } }, 503) : json({ ...page([], 2, 2), pageSize: 100 }));
+    // Terminate an erroneous extra request so the regression fails rather than loops forever.
+    fetch.mockResolvedValueOnce(json(page([], 0, 3)));
+    const saved = vi.fn();
+    render(<ApplicationForm application={application} onSaved={saved} onCancel={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('Loading portfolio choices…')).not.toBeInTheDocument();
+    expect(screen.queryByText('No portfolios available in your scope.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Payments' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Portfolio', { exact: true })).toBeDisabled();
+    const save = screen.getByRole('button', { name: 'Save application' });
+    expect(save).toBeDisabled();
+    await userEvent.clear(screen.getByLabelText('Name', { exact: true }));
+    await userEvent.type(screen.getByLabelText('Name', { exact: true }), 'Retained edit');
+    await userEvent.click(save);
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'PUT' || init?.method === 'POST')).toEqual([]);
+    expect(saved).not.toHaveBeenCalled();
+    let done!: (response: Response) => void;
+    fetch.mockReset().mockImplementationOnce(() => new Promise((resolve) => { done = resolve; }));
+    await userEvent.click(screen.getByRole('button', { name: 'Retry portfolios' }));
+    expect(screen.getByText('Loading portfolio choices…')).toBeVisible();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(save).toBeDisabled();
+    expect(String(fetch.mock.calls[0][0])).toContain('page=1&pageSize=100');
+    await act(async () => done(json(page([portfolio]))));
+    expect(save).toBeEnabled();
+    expect(screen.getByLabelText('Name', { exact: true })).toHaveValue('Retained edit');
+    fetch.mockResolvedValueOnce(json({ ...application, name: 'Retained edit' }));
+    await userEvent.click(save);
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({ ...application, name: 'Retained edit' }));
+    expect(JSON.parse(fetch.mock.calls[1][1]?.body as string)).toMatchObject({ name: 'Retained edit', portfolioId: portfolio.id });
+  });
+  it.each([
+    '<script>window.__textPayloadExecuted=true</script>',
+    '<img src=x onerror="window.__textPayloadExecuted=true">',
+    '<svg onload="window.__textPayloadExecuted=true"></svg>',
+  ])('keeps writable markup and literal search inert as React text: %s', async (text) => {
+    const detail = { ...application, name: text, description: text };
+    const fetch = mount(user, '/applications', page([detail]));
+    const marker = window as unknown as Record<string, unknown>;
+    delete marker.__textPayloadExecuted;
+    const assertInert = () => {
+      expect(document.querySelector('script, img[onerror], svg[onload], [onerror], [onload]')).toBeNull();
+      expect(marker.__textPayloadExecuted).toBeUndefined();
+    };
+    const link = await screen.findByRole('link', { name: text });
+    expect(link.textContent).toBe(text);
+    assertInert();
+    await userEvent.type(screen.getByLabelText('Search names'), text);
+    fetch.mockResolvedValueOnce(json(page([detail])));
+    await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+    await screen.findByRole('link', { name: text });
+    expect(new URL(String(fetch.mock.calls.at(-1)?.[0]), 'http://localhost').searchParams.get('search')).toBe(text);
+    expect(screen.getByLabelText('Search names')).toHaveValue(text);
+    assertInert();
+    fetch.mockResolvedValueOnce(json(detail));
+    await userEvent.click(screen.getByRole('link', { name: text }));
+    expect((await screen.findByRole('heading', { name: text })).textContent).toBe(text);
+    expect(screen.getAllByText(text, { exact: true }).some(node => node.tagName === 'DD')).toBe(true);
+    assertInert();
+    fetch.mockResolvedValueOnce(json(page([portfolio])));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit application' }));
+    await screen.findByRole('option', { name: 'Payments' });
+    expect(screen.getByLabelText('Name', { exact: true })).toHaveValue(text);
+    expect(screen.getByLabelText('Description', { exact: true })).toHaveValue(text);
+    fetch.mockResolvedValueOnce(json(detail)).mockResolvedValueOnce(json(detail));
+    await userEvent.click(screen.getByRole('button', { name: 'Save application' }));
+    await screen.findByText('Application updated');
+    const write = fetch.mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse(write?.[1]?.body as string)).toMatchObject({ name: text, description: text });
+    assertInert();
+  });
   it.each(['Administrator', 'Portfolio Leader', 'Engineer', 'Executive', 'Auditor', 'Read Only'] as const)(
     'honors %s create/edit/delete boundaries', async (role) => {
       const fetch = mount({ ...user, role });

@@ -5,7 +5,6 @@ from io import StringIO
 from unittest.mock import patch
 import pytest
 from bson import ObjectId
-from pymongo.errors import AutoReconnect
 from api.core.audit import AuditService
 from api.core.security import create_access_token
 from api.core.policy import ROLE_MAXIMUM
@@ -97,17 +96,19 @@ async def test_live_permission_reduction_checks_export_independently(client, db,
     assert await db.audit_logs.count_documents({'action':'export'}) == (1 if export == 200 else 0)
 
 async def test_export_audit_failure_returns_503_no_csv_or_event(client, db, app, auditor, events):
+    """Let Mongo reject the required export event while history remains readable."""
     writer = AuditService(db)
-    async def fail(document): raise AutoReconnect('sensitive outage payload')
+    await db.command({'collMod':'audit_logs', 'validator':{'$jsonSchema':{'required':['sensitive outage payload']}}, 'validationLevel':'strict', 'validationAction':'error'})
     app.dependency_overrides[get_service] = lambda: AuditHistoryService(AuditRepository(db), writer)
     try:
-        with patch.object(writer.collection, 'insert_one', fail):
-            response = await client.get('/api/audit-logs?format=csv', headers=auditor)
+        response = await client.get('/api/audit-logs?format=csv', headers=auditor)
     finally: app.dependency_overrides.pop(get_service)
     assert response.status_code == 503 and response.json()['error']['code'] == 'AUDIT_WRITE_FAILED'
     assert response.headers['X-Correlation-ID'] and 'sensitive' not in response.text
     assert response.headers['Content-Type'].startswith('application/json')
     assert await db.audit_logs.count_documents({}) == 5
+    assert await db.audit_logs.count_documents({'action':'export'}) == 0
+    assert await db.audit_logs.find({}).sort('_id', 1).to_list(None) == sorted(events, key=lambda row: row['_id'])
 
 async def test_global_audit_despite_assignments_gate_and_no_mutations(client, db, auditor, events):
     response = await client.get('/api/audit-logs', headers=auditor)

@@ -6,7 +6,7 @@ from io import StringIO
 from unittest.mock import patch
 import pytest
 from bson import ObjectId
-from pymongo.errors import AutoReconnect
+from pymongo.errors import DuplicateKeyError, OperationFailure, WriteError
 from api.core.audit import AuditService
 from api.core.csv import safe_cell, csv_line
 from api.core.errors import DomainError
@@ -86,10 +86,13 @@ async def test_service_checks_independent_permissions(db, principal, permissions
 
 async def test_record_failure_maps_required_audit_error(db):
     writer = AuditService(db)
-    async def fail(document): raise AutoReconnect('secret should never escape')
-    with patch.object(writer.collection, 'insert_one', fail), pytest.raises(DomainError) as error:
+    # Mongo rejects the service document for a genuinely missing schema field.
+    await db.command({'collMod':'audit_logs', 'validator':{'$jsonSchema':{'required':['secret should never escape']}}, 'validationLevel':'strict', 'validationAction':'error'})
+    with pytest.raises(DomainError) as error:
         await writer.record(None, 'Unknown account', 'login', 'user', None, 'Sign-in failed')
     assert error.value.code == 'AUDIT_WRITE_FAILED' and error.value.status == 503 and error.value.correlation
+    assert isinstance(error.value.__cause__, WriteError) and error.value.__cause__.code == 121
+    assert 'secret should never escape' in str(error.value.__cause__)
     assert 'secret' not in str(error.value) and await db.audit_logs.count_documents({}) == 0
 
 async def test_export_generation_failure_never_audits_and_closes_spool(db, principal):
@@ -105,22 +108,46 @@ async def test_export_audit_failure_closes_generated_spool_without_success(db, p
     service = AuditHistoryService(AuditRepository(db), AuditService(db))
     from tempfile import SpooledTemporaryFile
     spool = SpooledTemporaryFile(mode='w+b')
-    async def fail(document): raise AutoReconnect('test outage')
-    with patch('api.domains.audit.service.SpooledTemporaryFile', return_value=spool), patch.object(service.audit.collection, 'insert_one', fail), pytest.raises(DomainError) as error:
+    await db.command({'collMod':'audit_logs', 'validator':{'action':{'$ne':'export'}}, 'validationLevel':'strict', 'validationAction':'error'})
+    with patch('api.domains.audit.service.SpooledTemporaryFile', return_value=spool), pytest.raises(DomainError) as error:
         await service.export(principal, AuditFilters())
     assert error.value.code == 'AUDIT_WRITE_FAILED' and spool.closed
+    assert error.value.status == 503 and error.value.correlation
+    assert isinstance(error.value.__cause__, WriteError) and error.value.__cause__.code == 121
     assert await db.audit_logs.count_documents({}) == 0
 
 async def test_repository_read_failure_closes_export_and_does_not_audit(db, principal):
-    """Keep failed generation distinct from successful empty export."""
+    """Make real find/count commands fail on a malformed Mongo view input."""
     service = AuditHistoryService(AuditRepository(db), AuditService(db))
+    inserted = await db.audit_read_inputs.insert_one({'userName':'read fault'})
+    await db.command({'create':'audit_invalid_read_view', 'viewOn':'audit_read_inputs', 'pipeline':[{'$match':{'$expr':{'$eq':[{'$toInt':'$userName'}, 1]}}}]})
+    service.repository.collection = db['audit_invalid_read_view']
     from tempfile import SpooledTemporaryFile
     spool = SpooledTemporaryFile(mode='w+b')
-    with patch('api.domains.audit.service.SpooledTemporaryFile', return_value=spool), patch.object(service.repository.collection, 'find', side_effect=AutoReconnect('read fault')), pytest.raises(AutoReconnect):
+    with patch('api.domains.audit.service.SpooledTemporaryFile', return_value=spool), pytest.raises(OperationFailure) as export_error:
         await service.export(principal, AuditFilters())
+    assert export_error.value.code == 241
     assert spool.closed and await db.audit_logs.count_documents({}) == 0
-    with patch.object(service.repository.collection, 'count_documents', side_effect=AutoReconnect('read fault')), pytest.raises(AutoReconnect):
+    with pytest.raises(OperationFailure) as search_error:
         await service.search(principal, AuditFilters())
+    assert search_error.value.code == 241
+    assert await db.audit_logs.count_documents({}) == 0
+    assert await db.audit_read_inputs.find_one({'_id':inserted.inserted_id}) == {'_id':inserted.inserted_id, 'userName':'read fault'}
+
+async def test_record_real_duplicate_collision_preserves_original(db):
+    """A server unique-key rejection must not replace already durable evidence."""
+    writer = AuditService(db)
+    await db.audit_logs.create_index('userName', unique=True)
+    identifier = await writer.record(None, 'secret duplicate actor', 'login', 'user', None, 'Original evidence')
+    original = await db.audit_logs.find_one({'_id':identifier})
+    with pytest.raises(DomainError) as error:
+        await writer.record(None, 'secret duplicate actor', 'edit', 'user', None, 'Rejected evidence')
+    assert error.value.code == 'AUDIT_WRITE_FAILED' and error.value.status == 503 and error.value.correlation
+    assert isinstance(error.value.__cause__, DuplicateKeyError) and error.value.__cause__.code == 11000
+    assert 'secret' not in str(error.value)
+    assert await db.audit_logs.count_documents({}) == 1
+    assert await db.audit_logs.find_one({'_id':identifier}) == original
+    assert await db.audit_logs.count_documents({'details':'Rejected evidence'}) == 0
 
 async def test_large_export_rolls_transient_spool_and_preserves_all_rows(db, principal):
     """Prove memory-bounded generation beyond the spool rollover threshold."""

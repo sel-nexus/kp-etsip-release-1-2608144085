@@ -4,8 +4,7 @@ from io import StringIO
 from datetime import datetime, timezone
 import pytest
 from bson import ObjectId
-from pymongo.errors import OperationFailure
-from api.core.audit import AuditService
+
 
 APP_COLUMNS = ['id','name','portfolioId','criticality','tier','lifecycleStatus','applicationHealthScore','qualityScore','automationCoverage','unitTestCoverage','openDefects','openCriticalDefects','riskLevel']
 PORT_COLUMNS = ['id','name','ownerName','productArea','status','applicationCount','qualityScore']
@@ -121,7 +120,7 @@ async def test_portfolio_filters_means_and_empty_csv(client,db,identity):
             assert exported.text.strip() == ','.join(PORT_COLUMNS)
     assert (await client.get(PATHS[1]+'?status=Retired',headers=headers)).status_code == 400
 
-async def test_auth_gate_inactive_and_audit_failure_before_bytes(client,db,identity,monkeypatch):
+async def test_auth_gate_inactive_and_audit_failure_before_bytes(client,db,identity):
     await inventory(db)
     for path in PATHS:
         for headers in [{},{'Authorization':'Bearer bad'}]:
@@ -131,13 +130,19 @@ async def test_auth_gate_inactive_and_audit_failure_before_bytes(client,db,ident
     for path in PATHS:
         assert (await client.get(path,headers=headers)).status_code == 403
     await db.users.update_one({'_id':identity[0]['_id']},{'$set':{'mustChangePassword':False}})
-    async def fail(*args,**kwargs):
-        raise OperationFailure('injected audit write failure')
-    from api.domains.audit.repository import AuditRepository
-    monkeypatch.setattr(AuditRepository,'insert',fail)
-    for path in PATHS:
-        result = await client.get(path+'?format=csv',headers=headers)
-        assert result.status_code == 503 and result.json()['error']['code'] == 'AUDIT_WRITE_FAILED'
-        assert 'content-disposition' not in result.headers
+    audits_before = await db.audit_logs.find().sort('_id',1).to_list(None)
+    applications_before = await db.applications.find().sort('_id',1).to_list(None)
+    portfolios_before = await db.portfolios.find().sort('_id',1).to_list(None)
+    await db.command({'collMod':'audit_logs','validator':{'impossible':{'$exists':True}},'validationLevel':'strict','validationAction':'error'})
+    try:
+        for path in PATHS:
+            result = await client.get(path+'?format=csv',headers=headers)
+            assert result.status_code == 503 and result.json()['error']['code'] == 'AUDIT_WRITE_FAILED'
+            assert 'content-disposition' not in result.headers
+            assert await db.audit_logs.find().sort('_id',1).to_list(None) == audits_before
+            assert await db.applications.find().sort('_id',1).to_list(None) == applications_before
+            assert await db.portfolios.find().sort('_id',1).to_list(None) == portfolios_before
+    finally:
+        await db.command({'collMod':'audit_logs','validator':{}})
     await db.users.update_one({'_id':identity[0]['_id']},{'$set':{'status':'Inactive'}})
     assert (await client.get(PATHS[0],headers=headers)).status_code == 401

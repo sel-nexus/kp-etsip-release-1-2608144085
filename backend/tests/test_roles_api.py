@@ -1,15 +1,9 @@
 """Exercise role HTTP contracts, audit failures and live JWT authorization."""
 import asyncio
-from unittest.mock import patch
 import pytest
 from bson import ObjectId
-from pymongo.errors import AutoReconnect
-from api.core.audit import AuditService
 from api.core.security import create_access_token
 from api.core.policy import ROLE_MAXIMUM
-from api.domains.roles.router import get_service
-from api.domains.roles.repository import RoleRepository
-from api.domains.roles.service import RoleService
 
 @pytest.fixture
 async def admin(db, app, identity):
@@ -99,17 +93,16 @@ async def test_queries_forbidden(client, db, admin, method):
     assert await db.roles.find_one({'_id': row['_id']}) == row
 
 @pytest.mark.parametrize('operation', ['ensure','update'])
-async def test_audit_outage_reports_partial_write(client, app, db, admin, operation):
+async def test_audit_outage_reports_partial_write(client, db, admin, operation):
+    """Have Mongo reject the audit write while retaining the committed role."""
     row = await db.roles.find_one({'name': 'Engineer'})
     if operation == 'ensure': await db.roles.delete_one({'_id': row['_id']})
-    audit = AuditService(db)
-    async def failure(document):
-        raise AutoReconnect('test audit outage')
-    app.dependency_overrides[get_service] = lambda: RoleService(RoleRepository(db), audit)
+    options = await db.audit_logs.options()
+    await db.command('collMod', 'audit_logs', validator={'$jsonSchema': {'required': ['testOnlyAuditApproval']}}, validationLevel='strict', validationAction='error')
     try:
-        with patch.object(audit.collection, 'insert_one', failure):
-            response = await client.post('/api/roles', headers=admin, json={'name':'Engineer'}) if operation == 'ensure' else await client.put('/api/roles/'+str(row['_id']), headers=admin, json={'permissions': []})
-    finally: app.dependency_overrides.pop(get_service)
+        response = await client.post('/api/roles', headers=admin, json={'name':'Engineer'}) if operation == 'ensure' else await client.put('/api/roles/'+str(row['_id']), headers=admin, json={'permissions': []})
+    finally:
+        await db.command('collMod', 'audit_logs', validator=options.get('validator', {}), validationLevel=options.get('validationLevel', 'strict'), validationAction=options.get('validationAction', 'error'))
     assert response.status_code == 503 and response.json()['error']['code'] == 'AUDIT_WRITE_FAILED'
     assert response.headers['X-Correlation-ID']
     stored = await db.roles.find_one({'name':'Engineer'})

@@ -1,5 +1,5 @@
 /** Verify local sign-in, real backend identity, reload, and sign-out through UI. */
-import { test, expect } from './fixtures';
+import { test, expect, navigateShell, signOutShell } from './fixtures';
 for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
   test(`secure session journey at ${viewport.width}px`, async ({ page, identity, browserErrors }) => {
     await page.setViewportSize(viewport);
@@ -15,13 +15,32 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     expect(await page.evaluate(() => localStorage.getItem('kp-etsip-token'))).toBeNull();
     await page.getByLabel('Password').fill(identity.password);
     const signedIn = page.waitForResponse((response) => response.url().endsWith('/api/auth/login') && response.status() === 200);
-    await page.getByRole('button', { name: 'Sign in' }).click();
+    // Delay the real transport, not the response body, so pending UI is observable.
+    const transport = await page.context().newCDPSession(page);
+    await transport.send('Network.enable');
+    await transport.send('Network.emulateNetworkConditions', {
+      offline: false, latency: 1500, downloadThroughput: -1, uploadThroughput: -1,
+    });
+    let loginCompleted = false;
+    void signedIn.then(() => { loginCompleted = true; });
+    try {
+      await page.getByRole('button', { name: 'Sign in' }).click();
+      await expect(page.getByRole('button', { name: 'Signing in…' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Signing in…' })).toBeDisabled();
+      expect(loginCompleted).toBe(false);
+    } finally {
+      await transport.send('Network.emulateNetworkConditions', {
+        offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
+      });
+      await transport.detach();
+    }
     const response = await signedIn;
     expect(response.request().headers()['authorization']).toBeUndefined();
     const result = await response.json();
     expect(result.user.id).toBe(identity.id);
     expect(result.user.passwordHash).toBeUndefined();
     await expect(page.getByRole('heading', { name: result.user.name })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Signing in…' })).toHaveCount(0);
     await expect(page.getByText(result.user.email, { exact: true })).toBeVisible();
     await expect(page.getByText(result.user.role, { exact: true })).toBeVisible();
     const restored = page.waitForResponse((reply) => reply.url().endsWith('/api/auth/me') && reply.status() === 200);
@@ -30,10 +49,10 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     expect(me.request().headers()['authorization']).toBe(`Bearer ${result.token}`);
     expect((await me.json()).id).toBe(identity.id);
     await expect(page.getByRole('heading', { name: identity.name })).toBeVisible();
-    await page.getByRole('link', { name: 'Session', exact: true }).click();
+    await navigateShell(page, 'Session');
     await page.screenshot({ path: test.info().outputPath('session.png') });
     const logout = page.waitForResponse((reply) => reply.url().endsWith('/api/auth/logout'));
-    await page.getByRole('button', { name: 'Sign out' }).click();
+    await signOutShell(page);
     const logoutResponse = await logout;
     expect(logoutResponse.status()).toBe(200);
     expect(await logoutResponse.json()).toEqual({ message: 'Signed out' });

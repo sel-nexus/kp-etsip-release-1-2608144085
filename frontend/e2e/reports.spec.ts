@@ -1,6 +1,6 @@
 /** Real UI report/download journeys; intentionally not executed in this slice. */
 import { readFile } from 'node:fs/promises';
-import { test, expect } from './fixtures';
+import { test, expect, navigateShell } from './fixtures';
 import type { ApplicationReportRow, PortfolioReportRow, Page } from '../src/types';
 import { applicationColumns, portfolioColumns } from '../src/features/reports/reportApi';
 function parseCsv(text: string): string[][] {
@@ -37,22 +37,54 @@ for (const role of ['Engineer','Portfolio Leader','Administrator','Executive','A
         const loginResponse=page.waitForResponse(r=>r.url().endsWith('/api/auth/login'));
         await page.getByRole('button',{name:'Sign in',exact:true}).click();
         const session=await (await loginResponse).json();
-        await page.getByRole('link',{name:'Reports',exact:true}).click();
+        await navigateShell(page, 'Reports');
         await expect(page.getByRole('heading',{name:'Application report'})).toBeVisible();
         for (const resource of ['applications','portfolios'] as const) {
           if(resource==='portfolios') await page.getByRole('link',{name:'Portfolio report',exact:true}).click();
+          await expect(page.getByRole('heading', { name: resource === 'applications' ? 'Application report' : 'Portfolio report', exact: true })).toBeVisible();
           await page.getByLabel('productArea',{exact:true}).fill(identity.id);
           await page.getByLabel('Rows per page').selectOption('10');
-          const filteredResponse=page.waitForResponse(r=>r.url().includes(`/api/reports/${resource}?`)&&!r.url().includes('format=csv'));
+          const filteredResponse=page.waitForResponse(r=>r.url().includes(`/api/reports/${resource}?`) && new URL(r.url()).searchParams.get('productArea') === identity.id && !r.url().includes('format=csv'));
           await page.getByRole('button',{name:'Apply filters'}).click();
           const result:Page<ApplicationReportRow|PortfolioReportRow>=await (await filteredResponse).json();
           expect(result.total).toBe(resource==='applications'?12:1);
           await expect(page.getByRole('table')).toContainText(result.items[0].name);
-          expect(new URL(page.url()).searchParams.get('productArea')).toBe(identity.id);
+          await expect(page).toHaveURL(url => url.searchParams.get('productArea') === identity.id);
           const api=await page.request.get(`/api/reports/${resource}?productArea=${identity.id}&pageSize=100`,{headers:{Authorization:`Bearer ${session.token}`}});
           expect(api.status()).toBe(200);
           const all:Page<ApplicationReportRow|PortfolioReportRow>=await api.json();
           expect(all.items.some(row=>'portfolioId' in row ? row.portfolioId===scope.hidden : row.id===scope.hidden)).toBe(false);
+          // Follow the report row link and compare detail UI to its live response.
+          const selected = result.items[0];
+          const detailResponse = page.waitForResponse(r => new URL(r.url()).pathname === `/api/${resource}/${selected.id}` && r.status() === 200);
+          await page.getByRole('table').getByRole('link', { name: selected.name, exact: true }).click();
+          const detail = await (await detailResponse).json();
+          if (resource === 'applications') {
+            expect(detail.id).toBe(selected.id);
+            await expect(page.getByRole('heading', { name: detail.name, exact: true })).toBeVisible();
+            await expect(page.locator('dd').filter({ hasText: detail.id })).toHaveText(detail.id);
+            await expect(page.locator('dd').filter({ hasText: detail.description })).toHaveText(detail.description);
+            await expect(page.getByRole('link', { name: detail.portfolio.name, exact: true })).toHaveAttribute('href', `/portfolios/${detail.portfolio.id}`);
+            await page.getByRole('link', { name: 'Back to applications', exact: true }).click();
+            await expect(page.getByRole('heading', { name: 'Applications', exact: true })).toBeVisible();
+          } else {
+            expect(detail.portfolio.id).toBe(selected.id);
+            await expect(page.getByRole('heading', { name: detail.portfolio.name, exact: true })).toBeVisible();
+            await expect(page.locator('dd').filter({ hasText: detail.portfolio.description })).toHaveText(detail.portfolio.description);
+            await expect(page.locator('dd').filter({ hasText: detail.portfolio.ownerName })).toHaveText(detail.portfolio.ownerName);
+            await expect(page.getByRole('table', { name: 'Related applications' })).toContainText(detail.applications[0].name);
+            await page.getByRole('link', { name: 'Back to portfolios', exact: true }).click();
+            await expect(page.getByRole('heading', { name: 'Portfolios', exact: true })).toBeVisible();
+          }
+          await navigateShell(page, 'Reports');
+          if (resource === 'portfolios') await page.getByRole('link', { name: 'Portfolio report', exact: true }).click();
+          await expect(page.getByRole('heading', { name: resource === 'applications' ? 'Application report' : 'Portfolio report', exact: true })).toBeVisible();
+          await page.getByLabel('productArea', { exact: true }).fill(identity.id);
+          await page.getByLabel('Rows per page').selectOption('10');
+          const returnedReport = page.waitForResponse(r => r.url().includes(`/api/reports/${resource}?`) && !r.url().includes('format=csv'));
+          await page.getByRole('button', { name: 'Apply filters' }).click();
+          expect((await (await returnedReport).json()).total).toBe(result.total);
+          await expect(page.getByRole('table')).toContainText(selected.name);
           if(resource==='applications') {
             const next=page.waitForResponse(r=>r.url().includes('/api/reports/applications?')&&r.url().includes('page=2'));
             await page.getByRole('button',{name:'Next',exact:true}).click();
@@ -81,7 +113,7 @@ for (const role of ['Engineer','Portfolio Leader','Administrator','Executive','A
             await identity.verifyReport(resource,all.items,1);
           }
         }
-        await page.getByRole('link',{name:'Applications',exact:true}).click();
+        await navigateShell(page, 'Applications');
         await page.getByLabel('Filter portfolio ID').fill(scope.visible);
         await page.getByRole('button',{name:'Apply filters'}).click();
         await expect(page.getByRole('table')).toBeVisible();
@@ -93,7 +125,7 @@ for (const role of ['Engineer','Portfolio Leader','Administrator','Executive','A
           await page.getByRole('button',{name:'Export CSV'}).click();
           expect((await download).suggestedFilename()).toBe('application-report.csv');
         }
-        await page.getByRole('link',{name:'Reports',exact:true}).click();
+        await navigateShell(page, 'Reports');
         await page.getByLabel('search',{exact:true}).fill('No such report application');
         await page.getByRole('button',{name:'Apply filters'}).click();
         await expect(page.getByText('No applications match your scope and filters.')).toBeVisible();

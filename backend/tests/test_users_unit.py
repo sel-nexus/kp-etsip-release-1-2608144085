@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 import pytest
 from bson import ObjectId
-from pymongo.errors import AutoReconnect, DuplicateKeyError
+from pymongo.errors import WriteError, OperationFailure, DuplicateKeyError
 from api.core.audit import AuditService
 from api.core.errors import DomainError
 from api.core.policy import Principal, ROLE_MAXIMUM, Scope
@@ -138,19 +138,17 @@ async def test_stale_and_competing_updates_preserve_winner(db):
     assert (await users.snapshot(identifier))['name'] == 'Winner'
 
 
-async def test_ambiguous_write_keeps_durable_pin_for_reconciliation(db):
-    """Inject lost acknowledgement after a real write and retain conservative pins."""
+async def test_mongo_rejected_create_keeps_conservative_pin_for_reconciliation(db):
+    """Observe a real server rejection and the service's conservative retained pin."""
     users = await service(db)
     identifier = await parent(db)
-    insert = users.repository.insert
-    async def ambiguous(document: dict) -> ObjectId:
-        """Persist first, then emulate an unknown acknowledgement outcome."""
-        await insert(document)
-        raise AutoReconnect('test lost acknowledgement')
-    with patch.object(users.repository, 'insert', ambiguous):
-        with pytest.raises(AutoReconnect):
-            await users.create(actor(), UserCreate.model_validate(payload(access=[str(identifier)])))
-    assert await db.users.count_documents({}) == 1
+    await db.command('collMod', 'users', validator={'$jsonSchema': {'required': ['rejectTestWrites']}},
+        validationLevel='strict', validationAction='error')
+    with pytest.raises(WriteError) as error:
+        await users.create(actor(), UserCreate.model_validate(payload(access=[str(identifier)])))
+    assert error.value.code == 121
+    assert await db.users.count_documents({}) == 0
+    assert await db.audit_logs.count_documents({}) == 0
     assert (await db.portfolios.find_one({'_id': identifier}))['_applicationReservations']
 
 
@@ -158,9 +156,20 @@ async def test_confirmed_duplicate_releases_pins_and_partial_pin_failure_cleans_
     """Release definite nonwrites, never a possibly completed write."""
     users = await service(db)
     first, second = await parent(db), await parent(db, 'Other')
-    with patch.object(users.repository, 'insert', side_effect=DuplicateKeyError('test duplicate')):
-        with pytest.raises(DuplicateKeyError):
+    insert = users.repository.insert
+    winner = {**payload(), '_id': ObjectId(), 'portfolioAccess': []}
+    winner.pop('password')
+    async def competing_insert(document: dict) -> ObjectId:
+        """Insert a real competitor after validation; let Mongo reject the loser."""
+        await db.users.insert_one(winner)
+        return await insert(document)
+    with patch.object(users.repository, 'insert', competing_insert):
+        with pytest.raises(DuplicateKeyError) as error:
             await users.create(actor(), UserCreate.model_validate(payload(access=[str(first)])))
+    assert error.value.code == 11000
+    assert await db.users.find_one({}) == winner
+    assert await db.users.count_documents({}) == 1
+    assert await db.audit_logs.count_documents({}) == 0
     assert (await db.portfolios.find_one({'_id': first}))['_applicationReservations'] == []
     ordered = sorted([first, second], key=str)
     await db.portfolios.update_one({'_id': ordered[1]}, {'$set': {'_applicationDeleting': True}})
@@ -170,19 +179,19 @@ async def test_confirmed_duplicate_releases_pins_and_partial_pin_failure_cleans_
     assert (await db.portfolios.find_one({'_id': ordered[0]}))['_applicationReservations'] == []
 
 
-async def test_ambiguous_update_retains_both_parent_pins(db):
-    """Keep old and destination pins when an assignment write loses acknowledgement."""
+async def test_mongo_rejected_update_retains_both_parent_pins(db):
+    """Requery unchanged assignments and retained pins after real Mongo rejection."""
     users = await service(db)
     first, second = await parent(db), await parent(db, 'Other')
     created = await users.create(actor(), UserCreate.model_validate(payload(access=[str(first)])))
-    update = users.repository.update
-    async def ambiguous(snapshot: dict, changes: dict) -> dict:
-        await update(snapshot, changes)
-        raise AutoReconnect('test lost acknowledgement')
-    with patch.object(users.repository, 'update', ambiguous):
-        with pytest.raises(AutoReconnect):
-            await users.update(actor(), ObjectId(created.id), UserUpdate(portfolioAccess=[str(second)]))
-    assert (await users.snapshot(ObjectId(created.id)))['portfolioAccess'] == [second]
+    before = await db.users.find_one({'_id': ObjectId(created.id)})
+    await db.command('collMod', 'users', validator={'$jsonSchema': {'required': ['rejectTestWrites']}},
+        validationLevel='strict', validationAction='error')
+    with pytest.raises(OperationFailure) as error:
+        await users.update(actor(), ObjectId(created.id), UserUpdate(portfolioAccess=[str(second)]))
+    assert error.value.code == 121
+    assert await db.users.find_one({'_id': ObjectId(created.id)}) == before
+    assert await db.audit_logs.count_documents({}) == 1
     for identifier in (first, second):
         assert (await db.portfolios.find_one({'_id': identifier}))['_applicationReservations']
 

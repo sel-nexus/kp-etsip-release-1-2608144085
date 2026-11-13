@@ -26,6 +26,8 @@ class UserCreate(WriteModel):
     @classmethod
     def bcrypt_length(cls, value: SecretStr) -> SecretStr:
         """Reject truncation aliases without inventing a password complexity policy."""
+        if '\x00' in value.get_secret_value():
+            raise ValueError('Password cannot contain NUL characters')
         if len(value.get_secret_value().encode('utf-8')) > 72:
             raise ValueError('Password exceeds bcrypt byte limit')
         return value

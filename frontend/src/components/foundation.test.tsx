@@ -132,7 +132,18 @@ it('bounds paging, handles empty/out-of-range results and invokes keyboard actio
 });
 it('associates errors and headers and disables pending actions without calling handlers', async () => {
   const action = vi.fn(); const user = userEvent.setup();
-  render(<><FormField id="name" label="Name" error="Required name" required /><Button loading onClick={action}>Save</Button><DataTable caption="Inventory" rows={[{id:'a',name:'Demo'}]} rowKey={row=>row.id} columns={[{key:'name',label:'Name',render:row=>row.name}]} /></>);
+  render(
+    <>
+      <FormField id="name" label="Name" error="Required name" required />
+      <Button loading onClick={action}>Save</Button>
+      <DataTable
+        caption="Inventory"
+        rows={[{id:'a',name:'Demo'}]}
+        rowKey={row=>row.id}
+        columns={[{key:'name',label:'Name',render:row=>row.name}]}
+      />
+    </>,
+  );
   expect(screen.getByRole('textbox')).toHaveAccessibleDescription('Required name');
   expect(screen.getByRole('textbox')).toHaveAttribute('aria-invalid','true');
   expect(screen.getByRole('columnheader')).toHaveAttribute('scope','col');

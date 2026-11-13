@@ -166,3 +166,30 @@ async def test_related_pagination_counts_full_set_and_unknown_params_reject(clie
     assert related.status_code == 200 and related.json()['total'] == 26 and related.json()['items'][0]['name'] == 'App 25'
     assert (await client.get('/api/portfolios?page=1.0',headers=headers)).status_code == 400
     assert (await client.put(path,headers=headers,json={'name':'New','expectedUpdatedAt':123})).status_code == 422
+
+
+@pytest.mark.parametrize('text', [
+    '<script>window.__textPayloadExecuted=true</script>',
+    '<img src=x onerror="window.__textPayloadExecuted=true">',
+    '<svg onload="window.__textPayloadExecuted=true"></svg>',
+])
+async def test_markup_name_description_and_search_roundtrip_as_literal_text(client, db, headers, text):
+    """Accept text content without interpreting it as HTML or Mongo query syntax."""
+    created = await client.post('/api/portfolios', headers=headers, json={**BODY, 'name': text, 'description': text})
+    assert created.status_code == 201
+    identifier = ObjectId(created.json()['id'])
+    path = '/api/portfolios/' + str(identifier)
+    detail = await client.get(path, headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()['portfolio']['name'] == text and detail.json()['portfolio']['description'] == text
+    listed = await client.get('/api/portfolios', headers=headers, params={'search': text})
+    assert listed.status_code == 200 and listed.json()['total'] == 1
+    assert listed.json()['items'][0]['id'] == str(identifier)
+    edited_text = text + ' edited'
+    updated = await client.put(path, headers=headers, json={'name': edited_text, 'description': edited_text})
+    assert updated.status_code == 200
+    stored = await db.portfolios.find_one({'_id': identifier})
+    assert stored['name'] == edited_text and stored['description'] == edited_text
+    for body in [{'name': {'$ne': None}}, {'description': {'$gt': ''}}]:
+        assert (await client.put(path, headers=headers, json=body)).status_code == 422
+    assert await db.portfolios.find_one({'_id': identifier}) == stored

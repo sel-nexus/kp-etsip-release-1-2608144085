@@ -1,6 +1,6 @@
 /** Exercise the forced-password and durable-preference journey against the real backend. */
 import { randomBytes } from 'node:crypto';
-import { test, expect } from './fixtures';
+import { test, expect, navigateShell, signOutShell } from './fixtures';
 test.use({ identityOptions: { role: 'Administrator', mustChangePassword: true }, expectedHttpErrors: [401, 403] });
 for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
   test(`profile password gate and persistence at ${viewport.width}px`, async ({ page, identity, browserErrors }) => {
@@ -43,7 +43,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     expect(user.mustChangePassword).toBe(false);
     expect(user.passwordHash).toBeUndefined();
     expect(JSON.stringify(user)).not.toContain(replacement);
-    await page.getByRole('link', { name: 'My profile', exact: true }).click();
+    await navigateShell(page, 'My profile');
     await expect(page.getByRole('heading', { name: user.name })).toBeVisible();
     await expect(page.getByText(user.email, { exact: true })).toBeVisible();
     await expect(page.getByText(user.role, { exact: true })).toBeVisible();
@@ -56,8 +56,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     expect(saved.request().method()).toBe('PUT');
     expect((await saved.json()).defaultLandingPage).toBe('profile');
     await expect(page.getByText('Preference saved', { exact: true })).toBeVisible();
-    await page.getByRole('link', { name: 'Session', exact: true }).click();
-    await page.getByRole('link', { name: 'My profile', exact: true }).click();
+    await navigateShell(page, 'Session');
+    await navigateShell(page, 'My profile');
     const restore = page.waitForResponse((response) => response.url().endsWith('/api/auth/me'));
     await page.reload();
     const persisted = await restore;
@@ -66,7 +66,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
     await expect(page.getByLabel('Default landing page')).toHaveValue('profile');
     await identity.verifyProfile(replacement, 'profile');
     await page.screenshot({ path: test.info().outputPath('profile.png') });
-    await page.getByRole('button', { name: 'Sign out' }).click();
+    await signOutShell(page);
     await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
     await page.getByLabel('Email').fill(identity.email);
     await page.getByLabel('Password', { exact: true }).fill(replacement);

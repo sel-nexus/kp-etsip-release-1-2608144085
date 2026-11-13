@@ -34,6 +34,66 @@ async def test_service_rejects_invalid_credentials_with_failure_audit(db, app, i
         await service(db,app).login(LoginRequest(email=user['email'],password=password))
     assert await db.audit_logs.count_documents({'details':'Sign-in failed'}) == 1
     assert (await db.users.find_one({'_id':user['_id']}))['lastLogin'] is None
+    if case == 'unknown':
+        event = await db.audit_logs.find_one({'details': 'Sign-in failed'})
+        assert event['userId'] is None and event['entityId'] is None
+        assert event['userName'] == 'Unknown account'
+        assert user['email'] not in str(event)
+
+async def test_login_rejects_missing_stored_name_with_safe_failure_audit(db, app, identity):
+    """Reject an incomplete real Mongo identity without losing failure evidence."""
+    user, password = identity
+    assert (await db.users.update_one({'_id': user['_id']}, {'$unset': {'name': ''}})).modified_count == 1
+    before = await db.users.find_one({'_id': user['_id']})
+    assert 'name' not in before
+    with pytest.raises(Unauthenticated) as failure:
+        await service(db, app).login(LoginRequest(email=user['email'], password=password))
+    assert failure.value.status == 401 and failure.value.code == 'UNAUTHENTICATED'
+    assert failure.value.message == 'Unable to authenticate'
+    stored = await db.users.find_one({'_id': user['_id']})
+    assert stored == before and stored['lastLogin'] is None
+    events = await db.audit_logs.find({}).to_list(None)
+    assert len(events) == 1
+    assert events[0]['action'] == 'login' and events[0]['details'] == 'Sign-in failed'
+    assert events[0]['entityType'] == 'user'
+    assert events[0]['userId'] == user['_id'] and events[0]['entityId'] == user['_id']
+    assert events[0]['userName'] == 'Incomplete account'
+    assert user['email'] not in str(events) and password not in str(events)
+    assert user['passwordHash'] not in str(events)
+
+@pytest.mark.parametrize('change', ['deleted', 'inactive'])
+async def test_login_rejects_account_changed_before_real_timestamp_write(db, app, identity, change):
+    """Interleave a persisted account change before the real conditional update."""
+    user, password = identity
+    before = await db.users.find_one({'_id': user['_id']})
+
+    class InterleavedRepository(AuthRepository):
+        """Keep every repository operation on the real Mongo driver."""
+        async def mark_login(self, user_id, now):
+            """Change persisted eligibility, then execute the original update."""
+            if change == 'deleted':
+                await self.users.delete_one({'_id': user_id})
+            else:
+                await self.users.update_one({'_id': user_id}, {'$set': {'status': 'Inactive'}})
+            return await super().mark_login(user_id, now)
+
+    auth = AuthService(InterleavedRepository(db), AuditService(db), app.state.settings)
+    with pytest.raises(Unauthenticated) as error:
+        await auth.login(LoginRequest(email=user['email'], password=password))
+    assert error.value.code == 'UNAUTHENTICATED'
+    assert error.value.message == 'Unable to authenticate'
+    stored = await db.users.find_one({'_id': user['_id']})
+    if change == 'deleted':
+        assert stored is None
+    else:
+        assert stored['status'] == 'Inactive' and stored['lastLogin'] is None
+        assert stored['updatedAt'] == before['updatedAt']
+    events = await db.audit_logs.find({}).to_list(None)
+    assert len(events) == 1
+    assert events[0]['details'] == 'Sign-in failed' and events[0]['action'] == 'login'
+    assert events[0]['userId'] == user['_id'] and events[0]['entityId'] == user['_id']
+    assert password not in str(events)
+
 
 async def test_real_audit_failure_prevents_token_and_exposes_partial_timestamp(db, app, identity):
     user,password = identity
@@ -54,6 +114,48 @@ async def test_service_current_and_logout_reject_changed_identity(db,app,identit
     await db.users.update_one({'_id':user['_id']},{'$set':patch})
     for operation in (auth.current_user,auth.logout):
         with pytest.raises(Unauthenticated): await operation(principal)
+
+@pytest.mark.parametrize('permissions', ['view', ['view', None], ['view', {'action': 'edit'}], None])
+async def test_service_rejects_persisted_malformed_role_permissions(db, app, identity, permissions):
+    """Reject non-array, non-string elements and missing persisted permissions."""
+    user, _ = identity
+    auth = service(db, app)
+    token = create_access_token(user['_id'], app.state.settings)
+    principal = await auth.resolve(token)
+    mutation = {'$unset': {'permissions': ''}} if permissions is None else {'$set': {'permissions': permissions}}
+    assert (await db.roles.update_one({'name': user['role']}, mutation)).modified_count == 1
+    stored = await db.roles.find_one({'name': user['role']})
+    if permissions is None:
+        assert 'permissions' not in stored
+    else:
+        assert stored['permissions'] == permissions
+    for operation, argument in ((auth.resolve, token), (auth.current_user, principal), (auth.logout, principal)):
+        with pytest.raises(Unauthenticated) as failure:
+            await operation(argument)
+        assert failure.value.status == 401 and failure.value.code == 'UNAUTHENTICATED'
+        assert failure.value.message == 'Unable to authenticate'
+    assert (await db.users.find_one({'_id': user['_id']}))['lastLogin'] is None
+    assert await db.audit_logs.count_documents({}) == 0
+
+
+@pytest.mark.parametrize('key', ['name', 'portfolioAccess', 'role', 'status'])
+async def test_service_rejects_persisted_missing_required_user_keys(db, app, identity, key):
+    """Reload genuinely incomplete Mongo records and fail with generic rejection."""
+    user, _ = identity
+    auth = service(db, app)
+    token = create_access_token(user['_id'], app.state.settings)
+    principal = await auth.resolve(token)
+    assert (await db.users.update_one({'_id': user['_id']}, {'$unset': {key: ''}})).modified_count == 1
+    before = await db.users.find_one({'_id': user['_id']})
+    assert key not in before
+    for operation, argument in ((auth.resolve, token), (auth.current_user, principal), (auth.logout, principal)):
+        with pytest.raises(Unauthenticated) as failure:
+            await operation(argument)
+        assert failure.value.status == 401 and failure.value.code == 'UNAUTHENTICATED'
+        assert failure.value.message == 'Unable to authenticate'
+    assert await db.users.find_one({'_id': user['_id']}) == before
+    assert await db.audit_logs.count_documents({}) == 0
+
 
 @pytest.mark.parametrize('role', list(ROLE_MAXIMUM))
 @pytest.mark.parametrize('action', ['view','create','edit','delete','export','administer'])

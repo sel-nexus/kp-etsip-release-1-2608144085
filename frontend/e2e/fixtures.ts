@@ -1,5 +1,6 @@
 /** Generate disposable credentials and capture browser faults before entry. */
 import { test as base, expect } from '@playwright/test';
+import type { Page, Locator } from '@playwright/test';
 import { MongoClient, ObjectId } from 'mongodb';
 import { hash, compare } from 'bcryptjs';
 import { execFile } from 'node:child_process';
@@ -145,3 +146,36 @@ export const seededTest = test.extend<{ seededRelease: { password: (admin: boole
     } finally { await client.close(); }
   },
 });
+
+/** Use the real responsive shell, never hidden desktop controls on mobile. */
+async function shellControls(page: Page): Promise<{ navigation: Locator; drawer: Locator | null }> {
+  const opener = page.getByRole('button', { name: 'Open navigation', exact: true });
+  // Wait for the authenticated shell before deciding which layout is visible.
+  await expect(page.getByRole('banner')).toBeVisible();
+  if (await opener.isVisible()) {
+    await opener.click();
+    const drawer = page.getByRole('dialog', { name: 'Navigation', exact: true });
+    await expect(drawer).toBeVisible();
+    await expect(opener).toHaveAttribute('aria-expanded', 'true');
+    return { navigation: drawer.getByRole('navigation', { name: 'Session navigation', exact: true }), drawer };
+  }
+  return { navigation: page.getByRole('navigation', { name: 'Session navigation', exact: true }), drawer: null };
+}
+
+/** Navigate through visible shell links and prove the mobile drawer dismisses. */
+export async function navigateShell(page: Page, name: string): Promise<void> {
+  const { navigation, drawer } = await shellControls(page);
+  await navigation.getByRole('link', { name, exact: true }).click();
+  if (drawer) {
+    await expect(drawer).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Open navigation', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  }
+}
+
+/** Sign out from the active shell controls, including the real mobile drawer. */
+export async function signOutShell(page: Page): Promise<void> {
+  const { navigation, drawer } = await shellControls(page);
+  await navigation.getByRole('button', { name: 'Sign out', exact: true }).click();
+  if (drawer) await expect(drawer).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+}

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 import pytest
 from bson import ObjectId
+from pymongo.errors import WriteError
 from api.core.audit import AuditService
 from api.core.errors import DomainError
 from api.core.policy import Principal, ROLE_MAXIMUM
@@ -98,19 +99,21 @@ async def test_missing_and_atomic_version_conflict(service, principal, db):
 
 @pytest.mark.parametrize('operation', ['ensure', 'update'])
 async def test_service_audit_failure_preserves_partial_write(service, principal, db, operation):
-    """Fail only the required audit acknowledgement, not domain persistence."""
-    from pymongo.errors import AutoReconnect
+    """Have Mongo reject the required audit write, not domain persistence."""
     role = await service.ensure(principal, RoleEnsure(name='Engineer')) if operation == 'update' else None
     before = await db.audit_logs.count_documents({})
-    async def failure(document):
-        raise AutoReconnect('test audit outage')
-    with patch.object(service.audit.collection, 'insert_one', failure):
+    options = await db.audit_logs.options()
+    await db.command('collMod', 'audit_logs', validator={'$jsonSchema': {'required': ['testOnlyAuditApproval']}}, validationLevel='strict', validationAction='error')
+    try:
         with pytest.raises(DomainError) as caught:
             if operation == 'ensure':
                 await service.ensure(principal, RoleEnsure(name='Engineer'))
             else:
                 await service.update(principal, ObjectId(role.id), RoleUpdate(permissions=[]))
+    finally:
+        await db.command('collMod', 'audit_logs', validator=options.get('validator', {}), validationLevel=options.get('validationLevel', 'strict'), validationAction=options.get('validationAction', 'error'))
     assert caught.value.status == 503 and caught.value.code == 'AUDIT_WRITE_FAILED'
+    assert isinstance(caught.value.__cause__, WriteError) and caught.value.__cause__.code == 121
     assert caught.value.correlation
     stored = await db.roles.find_one({'name': 'Engineer'})
     assert stored['permissions'] == ([] if operation == 'update' else sorted(ROLE_MAXIMUM['Engineer']))

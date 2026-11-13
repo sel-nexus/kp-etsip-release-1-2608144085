@@ -1,9 +1,10 @@
 /** Exercise UI actions and the real auth client at its HTTP boundary. */
 import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import { SessionProvider } from './SessionProvider';
+import { SessionProvider, useSession } from './SessionProvider';
 import { AppRoutes } from '../../routes';
 import { authApi } from './authApi';
 import { apiRequest, TOKEN_KEY, SESSION_EXPIRED } from '../../lib/api';
@@ -17,7 +18,74 @@ const mount = () => render(
     </SessionProvider>
   </MemoryRouter>,
 );
+/** Expose provider actions even while restoration or login is pending. */
+function SessionProbe() {
+  const session = useSession();
+  const [loggedOut, setLoggedOut] = useState(false);
+  return (
+    <section>
+      <p>{session.user?.name ?? 'Signed out'}</p>
+      <p>{session.loading ? 'Loading identity' : 'Idle'}</p>
+      {session.error && <p role="alert">{session.error}</p>}
+      {loggedOut && <p>Logout complete</p>}
+      <button onClick={() => { void session.login({ email: identity.email, password: 'test-password' }); }}>
+        Start login
+      </button>
+      <button onClick={() => { void session.logout().then(() => setLoggedOut(true)); }}>
+        Sign out
+      </button>
+    </section>
+  );
+}
 describe('Local session', () => {
+  it.each(['success', 'failure'] as const)('ignores delayed me %s after logout completes', async (outcome) => {
+    const user = userEvent.setup();
+    localStorage.setItem(TOKEN_KEY, 'stored-token');
+    let resolve!: (response: Response) => void;
+    let reject!: (reason: Error) => void;
+    vi.spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(() => new Promise<Response>((done, fail) => { resolve = done; reject = fail; }))
+      .mockResolvedValueOnce(json({ message: 'Signed out' }));
+    render(
+      <SessionProvider>
+        <SessionProbe />
+      </SessionProvider>,
+    );
+    expect(screen.getByText('Loading identity')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+    await waitFor(() => expect(localStorage.getItem(TOKEN_KEY)).toBeNull());
+    expect(screen.getByText('Signed out')).toBeVisible();
+    await act(async () => {
+      if (outcome === 'success') resolve(json(identity));
+      else reject(new TypeError('offline'));
+    });
+    expect(screen.getByText('Signed out')).toBeVisible();
+    expect(screen.getByText('Idle')).toBeVisible();
+    expect(screen.queryByText(identity.name)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+  });
+  it('ignores a delayed successful login after logout completes', async () => {
+    const user = userEvent.setup();
+    let resolve!: (response: Response) => void;
+    vi.spyOn(globalThis, 'fetch')
+      .mockImplementationOnce(() => new Promise<Response>((done) => { resolve = done; }))
+      .mockResolvedValueOnce(json({ message: 'Signed out' }));
+    render(
+      <SessionProvider>
+        <SessionProbe />
+      </SessionProvider>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Start login' }));
+    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByText('Logout complete')).toBeVisible();
+    expect(screen.getByText('Signed out')).toBeVisible();
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    await act(async () => resolve(json({ token: 'late-token', user: identity })));
+    expect(screen.getByText('Signed out')).toBeVisible();
+    expect(screen.queryByText(identity.name)).not.toBeInTheDocument();
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+  });
   it('does not call login on render and validates required fields', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch');
     mount();

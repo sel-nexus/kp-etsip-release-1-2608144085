@@ -4,7 +4,7 @@ import { MongoClient, ObjectId } from 'mongodb';
 import { loadEnv } from 'vite';
 import { fileURLToPath } from 'node:url';
 import type { Page as BrowserPage } from '@playwright/test';
-import { test as base, expect } from './fixtures';
+import { test as base, expect, navigateShell, signOutShell } from './fixtures';
 const env = loadEnv('development', fileURLToPath(new URL('../', import.meta.url)), '');
 const apiURL = process.env.E2E_API_URL || env.E2E_API_URL;
 interface JourneyData {
@@ -95,7 +95,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
       await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
       await signIn(page, identity.email, identity.password);
       const listResponse = page.waitForResponse((response) => response.url().includes('/api/portfolios?'));
-      await page.getByRole('link', { name: 'Portfolios', exact: true }).click();
+      await navigateShell(page, 'Portfolios');
       const listed = await listResponse;
       expect(listed.status()).toBe(200);
       expect((await listed.json()).total).toBeGreaterThanOrEqual(2);
@@ -188,13 +188,13 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
       await page.setViewportSize(viewport);
       await page.goto('/portfolios');
       const login = await signIn(page, identity.email, identity.password);
-      await page.getByRole('link', { name: 'Portfolios', exact: true }).click();
+      await navigateShell(page, 'Portfolios');
       await expect(page.getByText('No portfolios available in your scope.')).toBeVisible();
       await expect(page.getByRole('button', { name: 'Create portfolio' })).toHaveCount(0);
       await portfolioData.assign();
-      await page.getByRole('link', { name: 'Session', exact: true }).click();
+      await navigateShell(page, 'Session');
       const scoped = page.waitForResponse((response) => response.url().includes('/api/portfolios?'));
-      await page.getByRole('link', { name: 'Portfolios', exact: true }).click();
+      await navigateShell(page, 'Portfolios');
       const listed = await scoped;
       expect(listed.status()).toBe(200);
       const body = await listed.json();
@@ -212,13 +212,13 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 
         expect((await denied.json()).error.code).toBe('NOT_FOUND');
       }
       await page.getByRole('link', { name: 'Back to portfolios' }).click();
-      await page.getByRole('link', { name: 'My profile', exact: true }).click();
+      await navigateShell(page, 'My profile');
       await page.getByLabel('Default landing page').selectOption('portfolios');
       const preference = page.waitForResponse((response) => response.url().endsWith('/api/auth/preferences'));
       await page.getByRole('button', { name: 'Save preference' }).click();
       expect((await preference).status()).toBe(200);
       await expect(page.getByText('Preference saved', { exact: true })).toBeVisible();
-      await page.getByRole('button', { name: 'Sign out' }).click();
+      await signOutShell(page);
       await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
       await signIn(page, identity.email, identity.password);
       await expect(page.getByRole('heading', { name: 'Portfolios' })).toBeVisible();

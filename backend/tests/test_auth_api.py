@@ -47,11 +47,25 @@ async def test_invalid_login_generic_audited_no_timestamp(client, db, identity, 
         assert event['userId'] is None and event['entityId'] is None
         assert event['userName'] == 'Unknown account' and email not in str(event)
 
-@pytest.mark.parametrize('payload', [{}, {'email':'x@example.com'}, {'password':'sensitive-value'}, {'email':{'$ne':None},'password':'sensitive-value'}, {'email':'bad','password':'sensitive-value'}, {'email':'x@example.com','password':123}, {'email':'x@example.com','password':''}, {'email':'x@example.com','password':'sensitive-value','sensitive-value':'secret'}])
-async def test_validation_never_echoes_secrets_or_writes(client, db, payload):
+@pytest.mark.parametrize('payload,fields', [
+    ({}, {'email': 'Field is required', 'password': 'Field is required'}),
+    ({'email': 'x@example.com'}, {'password': 'Field is required'}),
+    ({'password': 'sensitive-value'}, {'email': 'Field is required'}),
+    ({'email': {'$ne': None}, 'password': 'sensitive-value'}, {'email': 'Invalid value'}),
+    ({'email': 'sensitive-value', 'password': 'sensitive-value'}, {'email': 'Invalid value'}),
+    ({'email': 'x@example.com', 'password': 123}, {'password': 'Invalid value'}),
+    ({'email': 'x@example.com', 'password': ''}, {'password': 'Invalid value'}),
+    ({'email': 'x@example.com', 'password': 'sensitive-value', 'sensitive-value': 'secret'}, {}),
+    ({'email': 'sensitive-value', 'password': {'sensitive-value': 'secret'}, 'sensitive-value': 'secret'},
+     {'email': 'Invalid value', 'password': 'Invalid value'}),
+    ({'email': '', 'password': 'sensitive-value'}, {'email': 'Invalid value'}),
+])
+async def test_validation_never_echoes_secrets_or_writes(client, db, payload, fields):
     response = await client.post('/api/auth/login', json=payload)
     assert response.status_code == 422
-    assert response.json() == {'error': {'code':'VALIDATION_ERROR','message':'Invalid request','fields':{}}}
+    assert response.json() == {'error': {'code':'VALIDATION_ERROR','message':'Invalid request','fields':fields}}
+    assert 'secret' not in response.text and '$ne' not in response.text
+    assert 'input' not in response.text and 'ctx' not in response.text
     assert 'sensitive-value' not in response.text
     assert await db.audit_logs.count_documents({}) == 0
 

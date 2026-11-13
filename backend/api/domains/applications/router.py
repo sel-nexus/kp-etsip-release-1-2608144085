@@ -48,7 +48,12 @@ Delete = Annotated[Principal, Depends(permission_dependency('delete', 'applicati
 @router.get('', response_model=ApplicationPage, responses={200: {'content': {'text/csv': {}}}}, summary='Find or export visible applications')
 async def list_applications(request: Request, principal: View, service: Service, reports: Annotated[ReportService, Depends(get_report_service)]) -> ApplicationPage | StreamingResponse:
     """Reuse report export and inventory predicates without duplicate CSV logic."""
-    query = parse_filters(request, ApplicationReportFilters)
+    try:
+        query = parse_filters(request, ApplicationReportFilters)
+    except DomainError as exc:
+        if exc.code == 'INVALID_FILTER':
+            raise DomainError('INVALID_FILTER', 'Invalid application filters', 400) from exc
+        raise
     if query.format == 'csv':
         return csv_response(await reports.export(principal, query, 'application'), 'application')
     return await service.list(principal, query)

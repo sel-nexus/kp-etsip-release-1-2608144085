@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException
 from fastapi.responses import JSONResponse
 from pymongo.errors import PyMongoError, DuplicateKeyError
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 class DomainError(Exception):
@@ -40,8 +41,26 @@ def register_errors(app: FastAPI) -> None:
         return envelope(exc.code, exc.message, exc.status, exc.fields, getattr(exc, 'correlation', None))
     @app.exception_handler(RequestValidationError)
     async def validation(request: Request, exc: RequestValidationError) -> JSONResponse:
-        """Never serialize Pydantic input, context, or attacker field names."""
-        return envelope('VALIDATION_ERROR', 'Invalid request', 422)
+        """Report declared fields only, never input, context, or extra keys."""
+        allowed: dict[tuple[str, str], str] = {}
+        dependant = getattr(request.scope.get('route'), 'dependant', None)
+        for source in ('body', 'query', 'path', 'header', 'cookie'):
+            for parameter in getattr(dependant, source + '_params', ()):
+                model = parameter.type_
+                if source == 'body' and isinstance(model, type) and issubclass(model, BaseModel):
+                    for name, field in model.model_fields.items():
+                        alias = field.alias or name
+                        allowed[(source, alias)] = alias
+                else:
+                    allowed[(source, parameter.alias)] = parameter.alias
+        fields: dict[str, str] = {}
+        for failure in exc.errors():
+            location = failure.get('loc', ())
+            if len(location) >= 2 and failure.get('type') != 'extra_forbidden':
+                name = allowed.get((location[0], location[1]))
+                if name:
+                    fields[name] = 'Field is required' if failure.get('type') == 'missing' else 'Invalid value'
+        return envelope('VALIDATION_ERROR', 'Invalid request', 422, fields)
     @app.exception_handler(HTTPException)
     async def http(request: Request, exc: HTTPException) -> JSONResponse:
         """Keep framework errors in the application envelope."""

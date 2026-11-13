@@ -109,3 +109,32 @@ async def test_audit_failure_returns_503_after_domain_persists(client,db,identit
     if method=='POST':assert await db.applications.find_one({'name':'After failure'}) is not None
     elif method=='PUT':assert (await db.applications.find_one({'_id':ObjectId(identifier)}))['qualityScore']==99
     else:assert await db.applications.find_one({'_id':ObjectId(identifier)}) is None
+
+
+@pytest.mark.parametrize('text', [
+    '<script>window.__textPayloadExecuted=true</script>',
+    '<img src=x onerror="window.__textPayloadExecuted=true">',
+    '<svg onload="window.__textPayloadExecuted=true"></svg>',
+])
+async def test_markup_names_descriptions_and_search_are_intentional_literal_text(client, db, identity, text):
+    """Store markup as text while rejecting executable URLs and Mongo operators."""
+    portfolio = await parent(db)
+    headers = await login(client, db, identity)
+    created = await client.post('/api/applications', headers=headers, json={**payload(portfolio, text), 'description': text})
+    assert created.status_code == 201
+    identifier = ObjectId(created.json()['id'])
+    path = '/api/applications/' + str(identifier)
+    for response in [created, await client.get(path, headers=headers)]:
+        assert response.json()['name'] == text and response.json()['description'] == text
+    listed = await client.get('/api/applications', headers=headers, params={'name': text, 'search': text})
+    assert listed.status_code == 200 and listed.json()['total'] == 1
+    assert listed.json()['items'][0]['id'] == str(identifier)
+    edited_text = text + ' edited'
+    updated = await client.put(path, headers=headers, json={'name': edited_text, 'description': edited_text})
+    assert updated.status_code == 200
+    stored = await db.applications.find_one({'_id': identifier})
+    assert stored['name'] == edited_text and stored['description'] == edited_text
+    for body in [{'repositoryUrl': 'javascript:alert(1)'}, {'pipelineUrl': 'data:text/html,<script>alert(1)</script>'}, {'name': {'$ne': None}}, {'description': {'$gt': ''}}]:
+        assert (await client.put(path, headers=headers, json=body)).status_code == 422
+    assert (await client.get('/api/applications', headers=headers, params={'search[$ne]': 'x'})).status_code == 400
+    assert await db.applications.find_one({'_id': identifier}) == stored

@@ -3,7 +3,7 @@ import { MongoClient, ObjectId } from 'mongodb';
 import { randomBytes } from 'node:crypto';
 import { loadEnv } from 'vite';
 import { fileURLToPath } from 'node:url';
-import { test as base, expect } from './fixtures';
+import { test as base, expect, navigateShell } from './fixtures';
 import type { Dashboard } from '../src/types';
 const env = loadEnv('development', fileURLToPath(new URL('../', import.meta.url)), '');
 interface DashboardInventory {
@@ -82,7 +82,7 @@ for (const width of [1280, 390]) {
       await page.getByLabel('Password', { exact: true }).fill(identity.password);
       await page.getByRole('button', { name: 'Sign in', exact: true }).click();
       const initial = page.waitForResponse((response) => response.url().includes('/api/dashboard/executive'));
-      await page.getByRole('link', { name: 'Dashboard', exact: true }).click();
+      await navigateShell(page, 'Dashboard');
       const initialResponse = await initial;
       expect(initialResponse.status()).toBe(200);
       const initialData: Dashboard = await initialResponse.json();
@@ -121,9 +121,9 @@ for (const width of [1280, 390]) {
       await expect(page.getByLabel('Filter portfolio ID')).toHaveValue(inventory.ids[0]);
       await expect(page.getByLabel('Product area')).toHaveValue(inventory.area);
       await expect(page.getByLabel('Risk level')).toHaveValue('High');
-      await page.getByRole('link', { name: 'My profile' }).click();
+      await navigateShell(page, 'My profile');
       const returned = page.waitForResponse((response) => response.url().includes('/api/dashboard/executive'));
-      await page.getByRole('link', { name: 'Dashboard', exact: true }).click();
+      await navigateShell(page, 'Dashboard');
       await inventory.verify(await (await returned).json());
       await page.getByLabel('Filter portfolio ID').fill(inventory.ids[2]);
       await page.getByRole('button', { name: 'Apply filters' }).click();

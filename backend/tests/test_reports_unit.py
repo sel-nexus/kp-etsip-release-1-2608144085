@@ -60,25 +60,34 @@ async def test_generation_validation_and_audit_failure_close_spools(db,identity,
     import api.domains.reports.service as module
     from tempfile import SpooledTemporaryFile
     from pydantic import ValidationError
-    from pymongo.errors import OperationFailure
-    from api.domains.audit.repository import AuditRepository
+
     spools=[]
     def capture(*args,**kwargs):
         spool = SpooledTemporaryFile(*args,**kwargs)
         spools.append(spool)
         return spool
     monkeypatch.setattr(module,'SpooledTemporaryFile',capture)
+    audits_before = await db.audit_logs.find().sort('_id',1).to_list(None)
     await db.applications.update_one({'portfolioId':ids[0]},{'$unset':{'riskLevel':''}})
     with pytest.raises(ValidationError):
         await service.export(principal,ApplicationReportFilters(),'application')
     assert spools[-1].closed
+    assert await db.audit_logs.find().sort('_id',1).to_list(None) == audits_before
+    assert await db.applications.count_documents({'portfolioId':ids[0],'riskLevel':{'$exists':False}}) == 1
     await db.applications.update_many({'portfolioId':ids[0]},{'$set':{'riskLevel':'Medium'}})
-    async def fail(*args,**kwargs):
-        raise OperationFailure('required audit failure')
-    monkeypatch.setattr(AuditRepository,'insert',fail)
-    with pytest.raises(DomainError) as error:
-        await service.export(principal,ApplicationReportFilters(),'application')
-    assert error.value.code == 'AUDIT_WRITE_FAILED' and spools[-1].closed
+    applications_before = await db.applications.find().sort('_id',1).to_list(None)
+    portfolios_before = await db.portfolios.find().sort('_id',1).to_list(None)
+    await db.command({'collMod':'audit_logs','validator':{'impossible':{'$exists':True}},'validationLevel':'strict','validationAction':'error'})
+    try:
+        with pytest.raises(DomainError) as error:
+            await service.export(principal,ApplicationReportFilters(),'application')
+        assert error.value.status == 503 and error.value.code == 'AUDIT_WRITE_FAILED'
+        assert spools[-1].closed
+        assert await db.audit_logs.find().sort('_id',1).to_list(None) == audits_before
+        assert await db.applications.find().sort('_id',1).to_list(None) == applications_before
+        assert await db.portfolios.find().sort('_id',1).to_list(None) == portfolios_before
+    finally:
+        await db.command({'collMod':'audit_logs','validator':{}})
     for operation,filters in [(service.applications_page,ApplicationReportFilters()),(service.portfolios_page,PortfolioReportFilters())]:
         with pytest.raises(DomainError):
             await operation(replace(principal,permissions=frozenset()),filters)

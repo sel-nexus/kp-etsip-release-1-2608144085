@@ -1,0 +1,41 @@
+{
+  "scenario": "300 applications, 20 concurrent in-process authenticated readers",
+  "p50_seconds": 0.17823069000000658,
+  "p95_seconds": 0.1877889940000017,
+  "errors": 0,
+  "query_plan": {
+    "isCached": false,
+    "stage": "LIMIT",
+    "limitAmount": 100,
+    "inputStage": {
+      "stage": "FETCH",
+      "inputStage": {
+        "stage": "IXSCAN",
+        "keyPattern": {
+          "portfolioId": 1,
+          "lifecycleStatus": 1
+        },
+        "indexName": "portfolioId_1_lifecycleStatus_1",
+        "isMultiKey": false,
+        "multiKeyPaths": {
+          "portfolioId": [],
+          "lifecycleStatus": []
+        },
+        "isUnique": false,
+        "isSparse": false,
+        "isPartial": false,
+        "indexVersion": 2,
+        "direction": "forward",
+        "indexBounds": {
+          "portfolioId": [
+            "[ObjectId('6af6fe9fef695a5357b5c473'), ObjectId('6af6fe9fef695a5357b5c473')]"
+          ],
+          "lifecycleStatus": [
+            "[MinKey, MaxKey]"
+          ]
+        }
+      }
+    }
+  },
+  "long_steady_load": "not executed; proposed HLD gate, not product SLA"
+}

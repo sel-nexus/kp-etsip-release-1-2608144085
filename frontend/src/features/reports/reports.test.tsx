@@ -1,7 +1,7 @@
 /** Exercise report rendering, URL transitions and explicit downloads. */
 import { render, screen, act, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { SessionProvider } from '../auth/SessionProvider';
 import { AppRoutes } from '../../routes';
@@ -11,6 +11,34 @@ const user = { id:'65b000000000000000000001',name:'Test',email:'test@example.com
 const app = { id:'65b200000000000000000001',name:'Persisted app',portfolioId:'65b100000000000000000001',criticality:'High',tier:2,lifecycleStatus:'Active',applicationHealthScore:82,qualityScore:79,automationCoverage:65,unitTestCoverage:72,openDefects:4,openCriticalDefects:1,riskLevel:'Medium' };
 const portfolio = { id:app.portfolioId,name:'Persisted portfolio',ownerName:'Test owner',productArea:'Payments',status:'Active',applicationCount:0,qualityScore:null };
 const json = (body:unknown,status=200) => new Response(JSON.stringify(body),{status});
+
+const originalURL = URL;
+const originalCreate = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+const originalRevoke = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+const originalClick = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'click');
+
+beforeEach(() => {
+  expect(URL).toBe(originalURL);
+  expect(Object.getOwnPropertyDescriptor(URL, 'createObjectURL')).toEqual(originalCreate);
+  expect(Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL')).toEqual(originalRevoke);
+  expect(Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, 'click')).toEqual(originalClick);
+});
+
+/** Replace browser download methods without changing the original URL constructor. */
+function mockDownloadBrowser() {
+  const create = vi.fn((_blob: Blob) => 'blob:report');
+  const revoke = vi.fn();
+  class DownloadURL extends URL {
+    static createObjectURL = create;
+    static revokeObjectURL = revoke;
+  }
+  vi.stubGlobal('URL', DownloadURL);
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    expect(this.isConnected).toBe(true);
+  });
+  return { create, revoke, click };
+}
+
 function mount(kind='applications',role='Engineer',entry?:string) {
   localStorage.setItem(TOKEN_KEY,'test-token');
   const fetch = vi.spyOn(globalThis,'fetch').mockResolvedValueOnce(json({...user,role}));
@@ -48,6 +76,7 @@ for (const kind of ['applications','portfolios']) {
       expect(screen.queryByRole('button',{name:'Export CSV'})).not.toBeInTheDocument();
     });
     it('shows export pending, denial and successful blob download on retry',async()=>{
+      const { create, revoke, click } = mockDownloadBrowser();
       const fetch=mount(kind);
       await screen.findByRole('table');
       let done!:(r:Response)=>void;
@@ -56,19 +85,41 @@ for (const kind of ['applications','portfolios']) {
       expect(screen.getByRole('button',{name:'Exporting CSV…'})).toBeDisabled();
       await act(async()=>done(json({error:{code:'FORBIDDEN',message:'Export denied',fields:{}}},403)));
       expect(await screen.findByRole('alert')).toHaveTextContent('Export denied');
-      vi.stubGlobal('URL',Object.assign(URL,{createObjectURL:vi.fn(()=> 'blob:test'),revokeObjectURL:vi.fn()}));
-      const click=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>undefined);
+      expect(create).not.toHaveBeenCalled();
+      expect(click).not.toHaveBeenCalled();
+      expect(revoke).not.toHaveBeenCalled();
       fetch.mockResolvedValueOnce(new Response('id,name\r\n1,Test',{headers:{'Content-Type':'text/csv'}}));
       await userEvent.click(screen.getByRole('button',{name:'Export CSV'}));
       expect(await screen.findByText('CSV download started')).toBeVisible();
+      await waitFor(() => expect(revoke).toHaveBeenCalledWith('blob:report'), { timeout: 2000 });
+      expect(revoke).toHaveBeenCalledTimes(1);
       expect(click).toHaveBeenCalledTimes(1);
+      expect(create).toHaveBeenCalledTimes(1);
+      const blob = create.mock.calls[0][0];
+      expect(blob).toBeInstanceOf(Blob);
+      expect(blob.type).toBe('text/csv');
+      expect(blob.size).toBe(new TextEncoder().encode('id,name\r\n1,Test').length);
+      const anchor = click.mock.instances[0] as HTMLAnchorElement;
+      expect(anchor.download).toBe(kind === 'portfolios' ? 'portfolio-report.csv' : 'application-report.csv');
+      expect(anchor.getAttribute('href')).toBe('blob:report');
+      expect(anchor.isConnected).toBe(false);
+      expect(document.querySelector('a[download]')).toBeNull();
       expect(String(fetch.mock.calls.at(-1)?.[0])).toContain('format=csv');
       expect(new Headers(fetch.mock.calls.at(-1)?.[1]?.headers).get('Authorization')).toBe('Bearer test-token');
     });
     it('reports load failure and retries rather than leaving stale data',async()=>{
       localStorage.setItem(TOKEN_KEY,'test-token');
       const fetch=vi.spyOn(globalThis,'fetch').mockResolvedValueOnce(json(user)).mockRejectedValueOnce(new Error('offline'));
-      render(<MemoryRouter initialEntries={[`/reports/${kind}`]} future={{v7_startTransition:true,v7_relativeSplatPath:true}}><SessionProvider><AppRoutes /></SessionProvider></MemoryRouter>);
+      render(
+        <MemoryRouter
+          initialEntries={[`/reports/${kind}`]}
+          future={{v7_startTransition:true,v7_relativeSplatPath:true}}
+        >
+          <SessionProvider>
+            <AppRoutes />
+          </SessionProvider>
+        </MemoryRouter>,
+      );
       await screen.findByRole('alert');
       expect(screen.queryByRole('table')).not.toBeInTheDocument();
       fetch.mockResolvedValueOnce(json({items:[],page:1,pageSize:25,total:0}));
@@ -78,26 +129,50 @@ for (const kind of ['applications','portfolios']) {
   });
 }
 it.each([401,503])('CSV failure %s creates no download and expires only 401',async(status)=>{
+  const { create, revoke, click } = mockDownloadBrowser();
   localStorage.setItem(TOKEN_KEY,'test-token');
   vi.spyOn(globalThis,'fetch').mockResolvedValueOnce(json({error:{code:'FAILED',message:'Failed',fields:{}}},status));
   await expect(reportApi.download('application-list',new URLSearchParams('search=Test'))).rejects.toThrow('Failed');
   expect(localStorage.getItem(TOKEN_KEY)).toBe(status===401?null:'test-token');
+  expect(create).not.toHaveBeenCalled();
+  expect(click).not.toHaveBeenCalled();
+  expect(revoke).not.toHaveBeenCalled();
+  expect(document.querySelector('a[download]')).toBeNull();
 });
 it('rejects non-CSV success and network failure',async()=>{
+  const { create, revoke, click } = mockDownloadBrowser();
   const fetch=vi.spyOn(globalThis,'fetch').mockResolvedValueOnce(json({}));
   await expect(reportApi.download('applications',new URLSearchParams())).rejects.toThrow('did not return CSV');
   fetch.mockRejectedValueOnce(new Error('offline'));
   await expect(reportApi.download('portfolios',new URLSearchParams())).rejects.toThrow('Unable to reach');
+  expect(create).not.toHaveBeenCalled();
+  expect(click).not.toHaveBeenCalled();
+  expect(revoke).not.toHaveBeenCalled();
+  expect(document.querySelector('a[download]')).toBeNull();
 });
 
 it('application inventory exports only on click and retains its list filters',async()=>{
+  const { create, revoke, click } = mockDownloadBrowser();
   localStorage.setItem(TOKEN_KEY,'test-token');
   const fetch=vi.spyOn(globalThis,'fetch').mockResolvedValueOnce(json(user)).mockResolvedValueOnce(json({items:[app],page:1,pageSize:25,total:1}));
-  render(<MemoryRouter initialEntries={['/applications?riskLevel=Medium&format=csv']} future={{v7_startTransition:true,v7_relativeSplatPath:true}}><SessionProvider><AppRoutes /></SessionProvider></MemoryRouter>);
+  render(
+    <MemoryRouter
+      initialEntries={['/applications?riskLevel=Medium&format=csv']}
+      future={{v7_startTransition:true,v7_relativeSplatPath:true}}
+    >
+      <SessionProvider>
+        <AppRoutes />
+      </SessionProvider>
+    </MemoryRouter>,
+  );
   await screen.findByRole('table');
   expect(String(fetch.mock.calls[1][0])).not.toContain('format=');
   fetch.mockResolvedValueOnce(json({error:{code:'AUDIT_WRITE_FAILED',message:'Audit unavailable',fields:{}}},503));
   await userEvent.click(screen.getByRole('button',{name:'Export CSV'}));
   expect(await screen.findByRole('alert')).toHaveTextContent('Audit unavailable');
   expect(String(fetch.mock.calls.at(-1)?.[0])).toContain('/applications?riskLevel=Medium&format=csv');
+  expect(create).not.toHaveBeenCalled();
+  expect(click).not.toHaveBeenCalled();
+  expect(revoke).not.toHaveBeenCalled();
+  expect(document.querySelector('a[download]')).toBeNull();
 });
