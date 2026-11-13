@@ -28,10 +28,10 @@ const fillPasswords = async (current = 'old', replacement = 'new', confirm = rep
   await userEvent.type(screen.getByLabelText('Confirm new password'), confirm);
 };
 describe('Profile and first-password gate', () => {
-  it('resolves completed audit landing while retaining future-page fallback', () => {
+  it('resolves completed audit landing while retaining unknown-page fallback', () => {
     expect(landingPath('audit')).toBe('/audit');
     expect(landingPath('dashboard')).toBe('/dashboard');
-    expect(landingPath('reports')).toBe('/');
+    expect(landingPath('reports')).toBe('/reports');
     expect(landingPath(null)).toBe('/');
   });
   it('displays safe access and only completed navigation with role-bounded preferences', async () => {
@@ -39,7 +39,7 @@ describe('Profile and first-password gate', () => {
     expect(await screen.findByText(identity.name)).toBeVisible();
     expect(screen.getByText(identity.email)).toBeVisible();
     expect(screen.getByText('No portfolio access')).toBeVisible();
-    expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/', '/', '/dashboard', '/profile', '/portfolios', '/applications']);
+    expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/', '/', '/dashboard', '/profile', '/portfolios', '/applications', '/reports']);
     expect(screen.queryByRole('option', { name: 'Users' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Audit' })).not.toBeInTheDocument();
   });
@@ -110,7 +110,7 @@ describe('Profile and first-password gate', () => {
     expect(await screen.findByText('Password changed')).toBeVisible();
     expect(screen.getByLabelText('New password')).toHaveValue('');
   });
-  it('saves future landing keys with pending, success and retained session state', async () => {
+  it('saves supported landing keys with pending, success and retained session state', async () => {
     const fetch = mount();
     await screen.findByRole('heading', { name: 'My profile' });
     await userEvent.selectOptions(screen.getByLabelText('Default landing page'), 'reports');
@@ -126,7 +126,7 @@ describe('Profile and first-password gate', () => {
     await userEvent.click(screen.getByRole('link', { name: /^Session$/ }));
     await userEvent.click(screen.getByRole('link', { name: 'My profile' }));
     expect(screen.getByLabelText('Default landing page')).toHaveValue('reports');
-    expect(screen.queryByRole('link', { name: 'Reports' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Reports' })).toHaveAttribute('href', '/reports');
   });
   it('shows preference denial and permits retry without claiming success', async () => {
     const fetch = mount();

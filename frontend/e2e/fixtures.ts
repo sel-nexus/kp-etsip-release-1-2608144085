@@ -5,12 +5,14 @@ import { hash, compare } from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { loadEnv } from 'vite';
 import { fileURLToPath } from 'node:url';
-import type { RoleName, AuditRow } from '../src/types';
+import type { RoleName, AuditRow, ApplicationReportRow, PortfolioReportRow } from '../src/types';
 const env = loadEnv('development', fileURLToPath(new URL('../', import.meta.url)), '');
 interface IdentityFixture {
   email: string; password: string; id: string; name: string;
   verifyAudit: (rows: AuditRow[], count: number) => Promise<void>;
   verifyProfile: (password: string, landing: string) => Promise<void>;
+  reportInventory: () => Promise<{ visible: string; hidden: string }>;
+  verifyReport: (resource: 'applications' | 'portfolios', rows: Array<ApplicationReportRow | PortfolioReportRow>, exports: number) => Promise<void>;
 }
 interface IdentityOptions { role: RoleName; mustChangePassword: boolean }
 
@@ -25,7 +27,32 @@ export const test = base.extend<{ identity: IdentityFixture; browserErrors: stri
     const db = client.db(databaseName);
     const now = new Date();
     const id = new ObjectId();
-    const identity: IdentityFixture = { verifyAudit: async (rows, count) => {
+    const reportIds: ObjectId[] = [];
+    const identity: IdentityFixture = {
+      reportInventory: async () => {
+        const visible = new ObjectId(); const hidden = new ObjectId();
+        reportIds.push(visible, hidden);
+        await db.collection('portfolios').insertMany([visible,hidden].map((portfolioId,index) => ({_id:portfolioId,name:`Report ${id}-${index}`,ownerName:'Test owner',description:'Fake fixture',productArea:id.toHexString(),status:'Active',createdAt:now,updatedAt:now})));
+        await db.collection('applications').insertMany(Array.from({length:13},(_,index)=>({name:`Report ${id} App ${index.toString().padStart(2,'0')}`,description:'Fake fixture',portfolioId:index===12?hidden:visible,productArea:id.toHexString(),businessOwner:'Test',technologyOwner:'Test',etsOwner:'Test',criticality:'High',tier:2,lifecycleStatus:'Active',technologyStack:'Python',repositoryUrl:null,pipelineUrl:null,applicationHealthScore:82,qualityScore:79,automationCoverage:65,unitTestCoverage:72,openDefects:4,openCriticalDefects:1,riskLevel:'Medium',createdAt:now,updatedAt:now})));
+        await db.collection('users').updateOne({_id:id},{$set:{portfolioAccess:[visible]}});
+        return {visible:visible.toHexString(),hidden:hidden.toHexString()};
+      },
+      verifyReport: async (resource,rows,exports) => {
+        for (const row of rows) {
+          const stored = await db.collection(resource).findOne({_id:new ObjectId(row.id)});
+          expect(stored?.name).toBe(row.name);
+          for (const [key,value] of Object.entries(row)) {
+            if (key==='id') continue;
+            if (key==='applicationCount') expect(value).toBe(await db.collection('applications').countDocuments({portfolioId:stored?._id}));
+            else if (key==='qualityScore' && resource==='portfolios') { expect(value).toBe(79); expect(stored?.qualityScore).toBeUndefined(); }
+            else expect(key==='portfolioId'?stored?.[key].toHexString():stored?.[key]).toBe(value);
+          }
+        }
+        const events = await db.collection('audit_logs').find({userId:id,action:'export',entityType:resource==='applications'?'application':'portfolio'}).toArray();
+        expect(events).toHaveLength(exports);
+        if (exports) expect(events.at(-1)?.details).toContain(`${rows.length} rows`);
+      },
+      verifyAudit: async (rows, count) => {
       const events = await db.collection('audit_logs').find({ userId: id }).toArray();
       expect(events.some((event) => event.action === 'login' && event.details === 'Sign-in succeeded')).toBe(true);
       expect(events.some((event) => event.action === 'edit' && event.details === 'Updated landing preference')).toBe(true);
@@ -55,6 +82,8 @@ export const test = base.extend<{ identity: IdentityFixture; browserErrors: stri
       expect(stored?.lastLogin).toBeInstanceOf(Date);
       expect(await db.collection('audit_logs').countDocuments({ userId: id, details: 'Sign-in succeeded' })).toBeGreaterThan(0);
     } finally {
+      await db.collection('applications').deleteMany({portfolioId:{$in:reportIds}});
+      await db.collection('portfolios').deleteMany({_id:{$in:reportIds}});
       await db.collection('users').deleteOne({ _id: id });
       await db.collection('audit_logs').deleteMany({ userId: id });
       await client.close();

@@ -2,6 +2,7 @@
 import re
 from datetime import datetime
 from typing import Any
+from collections.abc import AsyncIterator
 from bson import ObjectId
 from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
@@ -85,3 +86,13 @@ class ApplicationRepository:
             }},
         ])
         return await cursor.to_list(None)
+
+    async def iterate(self, scope: Scope, filters: ApplicationFilters) -> AsyncIterator[dict[str, Any]]:
+        """Stream the entire inventory predicate in bounded driver batches."""
+        fields = {key: 1 for key in ('name', 'portfolioId', 'criticality', 'tier', 'lifecycleStatus', 'applicationHealthScore', 'qualityScore', 'automationCoverage', 'unitTestCoverage', 'openDefects', 'openCriticalDefects', 'riskLevel')}
+        cursor = self.applications.find(self.predicate(scope, filters), fields).sort([('name', 1), ('_id', 1)]).batch_size(100)
+        try:
+            async for row in cursor:
+                yield row
+        finally:
+            await cursor.close()

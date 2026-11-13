@@ -21,6 +21,6 @@ export function landingChoices(role: RoleName): LandingPage[] {
 
 /** Resolve only completed landing routes; unsupported pages retain the session entry. */
 export function landingPath(preference: string | null): string {
-  const completed: Record<string, string> = { dashboard: '/dashboard', profile: '/profile', portfolios: '/portfolios', applications: '/applications', users: '/users', roles: '/roles', audit: '/audit' };
+  const completed: Record<string, string> = { dashboard: '/dashboard', profile: '/profile', portfolios: '/portfolios', applications: '/applications', users: '/users', roles: '/roles', audit: '/audit', reports: '/reports' };
   return preference ? completed[preference] ?? '/' : '/';
 }

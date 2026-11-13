@@ -147,3 +147,7 @@ export interface Dashboard {
   metrics: DashboardMetrics;
   portfolioComparisons: PortfolioComparisonRow[];
 }
+
+/** Fixed Release 1 reporting columns; no ownership secrets or stored derived fields. */
+export type ApplicationReportRow = Pick<Application, 'id' | 'name' | 'portfolioId' | 'criticality' | 'tier' | 'lifecycleStatus' | 'applicationHealthScore' | 'qualityScore' | 'automationCoverage' | 'unitTestCoverage' | 'openDefects' | 'openCriticalDefects' | 'riskLevel'>;
+export type PortfolioReportRow = Pick<Portfolio, 'id' | 'name' | 'ownerName' | 'productArea' | 'status' | 'applicationCount' | 'qualityScore'>;

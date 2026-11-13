@@ -3,6 +3,10 @@ from datetime import datetime
 from typing import Annotated
 from bson import ObjectId
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
+from api.domains.reports.router import get_service as get_report_service, parse_filters, csv_response
+from api.domains.reports.schemas import ApplicationReportFilters
+from api.domains.reports.service import ReportService
 from pydantic import ValidationError
 from pymongo.asynchronous.database import AsyncDatabase
 from api.core.audit import AuditService
@@ -41,9 +45,12 @@ Create = Annotated[Principal, Depends(permission_dependency('create', 'applicati
 Edit = Annotated[Principal, Depends(permission_dependency('edit', 'application'))]
 Delete = Annotated[Principal, Depends(permission_dependency('delete', 'application'))]
 
-@router.get('', response_model=ApplicationPage, summary='Find visible applications')
-async def list_applications(principal: View, service: Service, query: Annotated[ApplicationFilters, Depends(filters)]) -> ApplicationPage:
-    """Return only conjunctively filtered authorized application inventory."""
+@router.get('', response_model=ApplicationPage, responses={200: {'content': {'text/csv': {}}}}, summary='Find or export visible applications')
+async def list_applications(request: Request, principal: View, service: Service, reports: Annotated[ReportService, Depends(get_report_service)]) -> ApplicationPage | StreamingResponse:
+    """Reuse report export and inventory predicates without duplicate CSV logic."""
+    query = parse_filters(request, ApplicationReportFilters)
+    if query.format == 'csv':
+        return csv_response(await reports.export(principal, query, 'application'), 'application')
     return await service.list(principal, query)
 
 @router.post('', response_model=Application, status_code=201, summary='Create application')

@@ -52,7 +52,7 @@ async def test_scope_current_destination_empty_and_missing_ids(client,db,identit
         for method,body in [('GET',None),('PUT',{'qualityScore':1}),('DELETE',None)]:
             assert (await client.request(method,'/api/applications/'+identifier,headers=headers,json=body)).status_code == 404
 
-@pytest.mark.parametrize('query', ['portfolioId=bad','page=0','pageSize=101','page=1.2','tier=0','tier=true','criticality=bad','lifecycleStatus=bad','riskLevel=bad','unknown=x','format=csv','page=1&page=2','search='])
+@pytest.mark.parametrize('query', ['portfolioId=bad','page=0','pageSize=101','page=1.2','tier=0','tier=true','criticality=bad','lifecycleStatus=bad','riskLevel=bad','unknown=x','format=pdf','page=1&page=2','search='])
 async def test_malformed_query_is_400(client,db,identity,query):
     """Keep malformed query errors distinct from invalid body errors."""
     headers=await login(client,db,identity)

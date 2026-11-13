@@ -33,6 +33,9 @@ export function AppLayout({ children }: PropsWithChildren) {
           {!user.mustChangePassword && (
             <Link to="/applications" aria-current={location.pathname.startsWith('/applications') ? 'page' : undefined}>Applications</Link>
           )}
+          {!user.mustChangePassword && (
+            <Link to="/reports" aria-current={location.pathname.startsWith('/reports') ? 'page' : undefined}>Reports</Link>
+          )}
           {!user.mustChangePassword && user.role === 'Administrator' && (
             <Link to="/users" aria-current={location.pathname.startsWith('/users') ? 'page' : undefined}>Users</Link>
           )}

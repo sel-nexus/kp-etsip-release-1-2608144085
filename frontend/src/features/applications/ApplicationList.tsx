@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useSession } from '../auth/SessionProvider';
+import { reportApi } from '../reports/reportApi';
 import { applicationApi } from './applicationApi';
 import { ApplicationForm } from './ApplicationForm';
 import { Button } from '../../components/Button';
@@ -23,11 +24,20 @@ export default function ApplicationList() {
   const [revision, setRevision] = useState(0);
   const [creating, setCreating] = useState(false);
   const [notice, setNotice] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
+  const exportCsv = async () => {
+    setExporting(true); setExportError(''); setNotice('');
+    try { await reportApi.download('application-list', new URLSearchParams(key)); setNotice('CSV download started'); }
+    catch (failure) { setExportError(failure instanceof Error ? failure.message : 'Unable to export applications'); }
+    finally { setExporting(false); }
+  };
   useEffect(() => { document.title = 'Applications · KP ETSIP'; }, []);
   useEffect(() => {
     let active = true;
     setLoading(true); setError(''); setData(null);
-    applicationApi.list(new URLSearchParams(key)).then((response) => { if (active) setData(response); })
+    const filters = new URLSearchParams(key); filters.delete('format');
+    applicationApi.list(filters).then((response) => { if (active) setData(response); })
       .catch((failure) => { if (active) setError(failure instanceof Error ? failure.message : 'Unable to load applications'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -50,6 +60,9 @@ export default function ApplicationList() {
           <h1>Applications</h1>
           <p className="muted">Review ownership, lifecycle, health and quality in your authorized inventory.</p>
         </div>
+        {user && user.role !== 'Read Only' && (
+          <Button variant="secondary" disabled={loading || !data} loading={exporting} onClick={exportCsv}>Export CSV</Button>
+        )}
         {writable && <Button onClick={() => setCreating(true)}>Create application</Button>}
       </div>
       <form className="filters" key={key} onSubmit={filter}>
@@ -84,6 +97,7 @@ export default function ApplicationList() {
         <Button type="button" variant="secondary" onClick={() => setQuery({})}>Clear filters</Button>
       </form>
       <p role="status" aria-live="polite">{notice}</p>
+      {exportError && <p role="alert" className="error-text">{exportError}</p>}
       {loading && <p role="status">Loading applications…</p>}
       {error && (
         <div>

@@ -54,7 +54,6 @@ export default function ProfilePage() {
       </Card>
       <Card>
         <h2>Landing preference</h2>
-        <p className="muted">Release pages not yet available can be saved, but are not navigation links.</p>
         <form onSubmit={submit} aria-label="Landing preference" noValidate>
           <div className="form-field">
             <label htmlFor="landing-page">Default landing page</label>

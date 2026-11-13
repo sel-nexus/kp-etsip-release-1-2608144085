@@ -14,6 +14,8 @@ from api.domains.roles.router import router as role_router
 from api.domains.audit.router import router as audit_router
 from api.domains.dashboard.router import router as dashboard_router
 
+from api.domains.reports.router import router as report_router
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Compose implemented routers only, with validated startup configuration."""
     application = FastAPI(title='KP ETSIP Release 1', version='1.0.0', description='Platform Foundation local session API', lifespan=database_lifespan)
@@ -31,6 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(role_router)
     application.include_router(audit_router)
     application.include_router(dashboard_router)
+    application.include_router(report_router)
     @application.middleware('http')
     async def private_api(request: Request, call_next):
         """Prevent shared caches from retaining authenticated responses."""

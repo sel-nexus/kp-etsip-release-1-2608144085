@@ -11,6 +11,8 @@ import RoleAdminPage from './features/roles/RoleAdminPage';
 import AuditLogPage from './features/audit/AuditLogPage';
 import ApplicationList from './features/applications/ApplicationList';
 import ApplicationDetailPage from './features/applications/ApplicationDetailPage';
+import ApplicationReportPage from './features/reports/ApplicationReportPage';
+import PortfolioReportPage from './features/reports/PortfolioReportPage';
 import { AppLayout } from './components/AppLayout';
 import { Button } from './components/Button';
 /** Guard the shell while restored credentials are checked against the backend. */
@@ -77,6 +79,13 @@ export function AppRoutes() {
           <AuditLogPage />
         </AppLayout>
       ) : <Navigate to="/" replace /> : <Navigate to="/login" replace />} />
+      <Route path="/reports" element={<Navigate to="/reports/applications" replace />} />
+      <Route path="/reports/applications" element={session.user ? (
+        <AppLayout><ApplicationReportPage /></AppLayout>
+      ) : <Navigate to="/login" replace />} />
+      <Route path="/reports/portfolios" element={session.user ? (
+        <AppLayout><PortfolioReportPage /></AppLayout>
+      ) : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
