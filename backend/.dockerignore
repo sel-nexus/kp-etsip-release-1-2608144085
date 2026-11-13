@@ -1,5 +1,6 @@
 .env
 .env.local
+.env.prod
 node_modules
 dist
 __pycache__
