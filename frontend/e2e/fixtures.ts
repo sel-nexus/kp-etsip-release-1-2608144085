@@ -5,12 +5,14 @@ import { hash, compare } from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { loadEnv } from 'vite';
 import { fileURLToPath } from 'node:url';
+import type { RoleName, AuditRow } from '../src/types';
 const env = loadEnv('development', fileURLToPath(new URL('../', import.meta.url)), '');
 interface IdentityFixture {
   email: string; password: string; id: string; name: string;
+  verifyAudit: (rows: AuditRow[], count: number) => Promise<void>;
   verifyProfile: (password: string, landing: string) => Promise<void>;
 }
-interface IdentityOptions { role: 'Engineer' | 'Administrator'; mustChangePassword: boolean }
+interface IdentityOptions { role: RoleName; mustChangePassword: boolean }
 
 export const test = base.extend<{ identity: IdentityFixture; browserErrors: string[]; identityOptions: IdentityOptions; expectedHttpErrors: number[] }>({
   identityOptions: [{ role: 'Engineer', mustChangePassword: false }, { option: true }],
@@ -23,7 +25,22 @@ export const test = base.extend<{ identity: IdentityFixture; browserErrors: stri
     const db = client.db(databaseName);
     const now = new Date();
     const id = new ObjectId();
-    const identity: IdentityFixture = { verifyProfile: async (password, landing) => {
+    const identity: IdentityFixture = { verifyAudit: async (rows, count) => {
+      const events = await db.collection('audit_logs').find({ userId: id }).toArray();
+      expect(events.some((event) => event.action === 'login' && event.details === 'Sign-in succeeded')).toBe(true);
+      expect(events.some((event) => event.action === 'edit' && event.details === 'Updated landing preference')).toBe(true);
+      const exported = events.filter((event) => event.action === 'export');
+      expect(exported).toHaveLength(1);
+      expect(exported[0].entityType).toBe('audit');
+      expect(exported[0].details).toContain(`${count} rows`);
+      for (const row of rows) {
+        const stored = await db.collection('audit_logs').findOne({ _id: new ObjectId(row.id) });
+        expect(stored?.userId?.toHexString()).toBe(row.userId);
+        expect(stored?.details).toBe(row.details);
+        expect(stored?.action).toBe(row.action);
+        expect(stored?.timestamp.toISOString()).toBe(new Date(row.timestamp).toISOString());
+      }
+    }, verifyProfile: async (password, landing) => {
       const stored = await db.collection('users').findOne({ _id: id });
       expect(stored?.mustChangePassword).toBe(false);
       expect(stored?.defaultLandingPage).toBe(landing);
@@ -31,7 +48,7 @@ export const test = base.extend<{ identity: IdentityFixture; browserErrors: stri
       expect(await db.collection('audit_logs').countDocuments({ userId: id, action: 'edit' })).toBeGreaterThanOrEqual(2);
     }, id: id.toHexString(), email: `auth-${randomBytes(8).toString('hex')}@example.com`, password: randomBytes(24).toString('base64url'), name: 'Browser Test Engineer' };
     try {
-      await db.collection('roles').updateOne({ name: identityOptions.role }, { $setOnInsert: { name: identityOptions.role, permissions: identityOptions.role === 'Administrator' ? ['view','create','edit','delete','export','administer'] : ['view','create','edit','export'], description: 'Test engineer', createdAt: now, updatedAt: now } }, { upsert: true });
+      await db.collection('roles').updateOne({ name: identityOptions.role }, { $setOnInsert: { name: identityOptions.role, permissions: identityOptions.role === 'Administrator' ? ['view','create','edit','delete','export','administer'] : identityOptions.role === 'Read Only' ? ['view'] : ['Auditor','Executive'].includes(identityOptions.role) ? ['view','export'] : ['view','create','edit','export'], description: 'Test engineer', createdAt: now, updatedAt: now } }, { upsert: true });
       await db.collection('users').insertOne({ _id: id, name: identity.name, email: identity.email, passwordHash: await hash(identity.password, 12), role: identityOptions.role, portfolioAccess: [], status: 'Active', lastLogin: null, authSource: 'local', managerName: null, vendorIndicator: false, mustChangePassword: identityOptions.mustChangePassword, defaultLandingPage: null, createdAt: now, updatedAt: now });
       await use(identity);
       const stored = await db.collection('users').findOne({ _id: id });

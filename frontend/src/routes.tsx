@@ -7,6 +7,7 @@ import PortfolioList from './features/portfolios/PortfolioList';
 import PortfolioDetailPage from './features/portfolios/PortfolioDetailPage';
 import UserAdminPage from './features/users/UserAdminPage';
 import RoleAdminPage from './features/roles/RoleAdminPage';
+import AuditLogPage from './features/audit/AuditLogPage';
 import ApplicationList from './features/applications/ApplicationList';
 import ApplicationDetailPage from './features/applications/ApplicationDetailPage';
 import { AppLayout } from './components/AppLayout';
@@ -63,6 +64,11 @@ export function AppRoutes() {
       <Route path="/roles" element={session.user ? session.user.role === 'Administrator' ? (
         <AppLayout>
           <RoleAdminPage />
+        </AppLayout>
+      ) : <Navigate to="/" replace /> : <Navigate to="/login" replace />} />
+      <Route path="/audit" element={session.user ? ['Administrator', 'Auditor'].includes(session.user.role) ? (
+        <AppLayout>
+          <AuditLogPage />
         </AppLayout>
       ) : <Navigate to="/" replace /> : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />

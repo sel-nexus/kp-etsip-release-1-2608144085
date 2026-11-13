@@ -7,6 +7,7 @@ import { SessionProvider } from '../auth/SessionProvider';
 import { AppRoutes } from '../../routes';
 import { TOKEN_KEY } from '../../lib/api';
 import type { SafeUser } from '../../types';
+import { landingPath } from './profileApi';
 const identity: SafeUser = { id: '65b000000000000000000001', name: 'Profile Engineer', email: 'profile@example.com', role: 'Engineer', portfolioAccess: [], status: 'Active', defaultLandingPage: null, mustChangePassword: false };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const mount = (user = identity, entry = '/profile') => {
@@ -27,6 +28,11 @@ const fillPasswords = async (current = 'old', replacement = 'new', confirm = rep
   await userEvent.type(screen.getByLabelText('Confirm new password'), confirm);
 };
 describe('Profile and first-password gate', () => {
+  it('resolves completed audit landing while retaining future-page fallback', () => {
+    expect(landingPath('audit')).toBe('/audit');
+    expect(landingPath('reports')).toBe('/');
+    expect(landingPath(null)).toBe('/');
+  });
   it('displays safe access and only completed navigation with role-bounded preferences', async () => {
     mount();
     expect(await screen.findByText(identity.name)).toBeVisible();

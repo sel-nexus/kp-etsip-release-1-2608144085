@@ -113,3 +113,16 @@ export interface RoleDefinition {
   createdAt: string;
   updatedAt: string;
 }
+
+/** Keep table and CSV aligned with the public historical evidence contract. */
+export type AuditAction = 'login' | 'create' | 'edit' | 'delete' | 'roleChange' | 'permissionChange' | 'export';
+export interface AuditRow {
+  id: string;
+  timestamp: string;
+  userId: string | null;
+  userName: string;
+  action: AuditAction;
+  entityType: string;
+  entityId: string | null;
+  details: string;
+}

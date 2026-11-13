@@ -36,6 +36,9 @@ export function AppLayout({ children }: PropsWithChildren) {
           {!user.mustChangePassword && user.role === 'Administrator' && (
             <Link to="/roles" aria-current={location.pathname === '/roles' ? 'page' : undefined}>Roles</Link>
           )}
+          {!user.mustChangePassword && ['Administrator', 'Auditor'].includes(user.role) && (
+            <Link to="/audit" aria-current={location.pathname === '/audit' ? 'page' : undefined}>Audit history</Link>
+          )}
           <Button variant="secondary" loading={request.loading} onClick={signOut}>Sign out</Button>
         </nav>
       </header>
