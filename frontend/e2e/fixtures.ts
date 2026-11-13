@@ -2,6 +2,9 @@
 import { test as base, expect } from '@playwright/test';
 import { MongoClient, ObjectId } from 'mongodb';
 import { hash, compare } from 'bcryptjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { loadEnv } from 'vite';
 import { fileURLToPath } from 'node:url';
@@ -101,3 +104,44 @@ export const test = base.extend<{ identity: IdentityFixture; browserErrors: stri
   }, { auto: true }],
 });
 export { expect };
+
+/** Seed through the Python service, keeping credentials strictly in the test process. */
+export const seededTest = test.extend<{ seededRelease: { password: (admin: boolean) => string; inventory: Array<{ name: string; portfolioId: string; qualityScore: number; applicationHealthScore: number; automationCoverage: number; openCriticalDefects: number; riskLevel: string }>; portfolios: Array<{ id: string; name: string }>; restoreAdmin: () => Promise<void> } }>({
+  seededRelease: async ({}, use) => {
+    const databaseName = process.env.E2E_MONGODB_DB || env.E2E_MONGODB_DB;
+    const uri = process.env.E2E_MONGODB_URI || env.E2E_MONGODB_URI;
+    if (!databaseName?.startsWith('etsip_e2e_') || !uri) throw new Error('Seed browser tests require a disposable configured Mongo database');
+    const backendRoot = fileURLToPath(new URL('../../backend/', import.meta.url));
+    const backendEnv = loadEnv('development', backendRoot, '');
+    const adminPassword = process.env.SEED_ADMIN_PASSWORD || backendEnv.SEED_ADMIN_PASSWORD;
+    const demoPassword = process.env.SEED_DEMO_PASSWORD || backendEnv.SEED_DEMO_PASSWORD;
+    if (!adminPassword || !demoPassword) throw new Error('Seed browser credentials must be configured');
+    try {
+      await promisify(execFile)(`${homedir()}/venvs/app/bin/python`, ['-m', 'api.seed.runner'], {
+        cwd: backendRoot, env: { ...process.env, MONGODB_DB: databaseName, MONGODB_URI: uri,
+          SEED_ADMIN_PASSWORD: adminPassword, SEED_DEMO_PASSWORD: demoPassword },
+      });
+    } catch { throw new Error('Seed CLI failed; check secure seed configuration and Mongo readiness'); }
+    const client = new MongoClient(uri);
+    try {
+      await client.connect();
+      const db = client.db(databaseName);
+      const portfolios = await db.collection('portfolios').find({ name: { $in: ['Payments','Customer Platform','Data & Analytics'] } }).toArray();
+      expect(portfolios).toHaveLength(3);
+      const inventory = await db.collection('applications').find({ portfolioId: { $in: portfolios.map(row=>row._id) } }).toArray();
+      expect(inventory).toHaveLength(10);
+      const admin = await db.collection('users').findOne({ email:'admin@ketsip.local' });
+      if (!admin) throw new Error('Seed administrator missing');
+      const restoreAdmin = async () => {
+        await db.collection('users').updateOne({ _id:admin._id }, { $set:{ passwordHash:admin.passwordHash, mustChangePassword:admin.mustChangePassword, defaultLandingPage:admin.defaultLandingPage } });
+      };
+      try {
+        await use({ password:(isAdmin)=>isAdmin?adminPassword:demoPassword,
+          portfolios:portfolios.map(row=>({id:row._id.toHexString(),name:row.name as string})),
+          inventory:inventory.map(row=>({name:row.name as string,portfolioId:row.portfolioId.toHexString(),qualityScore:row.qualityScore as number,
+            applicationHealthScore:row.applicationHealthScore as number,automationCoverage:row.automationCoverage as number,
+            openCriticalDefects:row.openCriticalDefects as number,riskLevel:row.riskLevel as string})), restoreAdmin });
+      } finally { await restoreAdmin(); }
+    } finally { await client.close(); }
+  },
+});

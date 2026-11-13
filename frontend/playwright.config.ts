@@ -10,7 +10,7 @@ export default defineConfig({ testDir: './e2e', workers: 1, fullyParallel: false
   use: { baseURL, trace: 'retain-on-failure', screenshot: 'only-on-failure' },
   webServer: [
     { command: 'cd ../backend && "$HOME/venvs/app/bin/python" -m uvicorn api.main:app --host 127.0.0.1 --port 8000',
-      cwd: root, url: `${apiURL}/api/health`, reuseExistingServer: false, env: { MONGODB_DB: process.env.E2E_MONGODB_DB || env.E2E_MONGODB_DB } },
+      cwd: root, url: `${apiURL}/api/health`, reuseExistingServer: false, env: { MONGODB_DB: process.env.E2E_MONGODB_DB || env.E2E_MONGODB_DB, MONGODB_URI: process.env.E2E_MONGODB_URI || env.E2E_MONGODB_URI, SEED_ON_STARTUP: 'false' } },
     { command: 'node node_modules/vite/bin/vite.js', cwd: root, url: baseURL, reuseExistingServer: true },
   ],
 });

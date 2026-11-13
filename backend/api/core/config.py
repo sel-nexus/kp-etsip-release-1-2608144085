@@ -15,6 +15,26 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = 'development'
     API_HOST: str = '0.0.0.0'
     API_PORT: int = 8000
+    SEED_ON_STARTUP: bool = False
+    SEED_ADMIN_PASSWORD: SecretStr | None = None
+    SEED_DEMO_PASSWORD: SecretStr | None = None
+
+    def require_seed_passwords(self) -> tuple[str, str]:
+        """Require explicit non-sample credentials without exposing their values.
+
+        Raises:
+            ValueError: If either seed credential is absent, sample, or truncated by bcrypt.
+        """
+        values = []
+        for key in ("SEED_ADMIN_PASSWORD", "SEED_DEMO_PASSWORD"):
+            secret = getattr(self, key)
+            raw = secret.get_secret_value() if secret else ""
+            if not raw.strip() or "\0" in raw or len(raw.encode("utf-8")) > 72 or any(
+                word in raw.lower() for word in ("dummy", "change-me", "change-in-production", "placeholder", "password", "example", "replace-me")
+            ):
+                raise ValueError(f"{key} requires an operator-supplied non-sample credential")
+            values.append(raw)
+        return values[0], values[1]
     @field_validator('JWT_SECRET')
     @classmethod
     def real_key(cls, value: SecretStr) -> SecretStr:

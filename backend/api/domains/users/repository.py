@@ -3,6 +3,7 @@ import re
 from typing import Any
 from bson import ObjectId
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 from pymongo.collation import Collation
 from pymongo.asynchronous.database import AsyncDatabase
 from api.domains.users.schemas import UserFilters
@@ -63,3 +64,16 @@ class UserRepository:
     async def update(self, snapshot: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any] | None:
         """Compare timestamp and old assignments before the atomic account write."""
         return await self.users.find_one_and_update({'_id': snapshot['_id'], 'updatedAt': snapshot['updatedAt'], 'portfolioAccess': snapshot['portfolioAccess']}, {'$set': changes}, projection={'passwordHash': 0}, return_document=ReturnDocument.AFTER)
+
+    async def seed_ensure(self, document: dict[str, Any]) -> dict[str, Any]:
+        """Insert a missing natural key only; preserve operator edits on repeat runs."""
+        query = {'email': document['email']}
+        try:
+            await self.users.update_one(query, {'$setOnInsert': document}, upsert=True, collation=EMAIL_COLLATION)
+        except DuplicateKeyError:
+            # The unique natural-key winner is returned below, never overwritten.
+            pass
+        row = await self.users.find_one(query, {'passwordHash': 0}, collation=EMAIL_COLLATION)
+        if row is None:
+            raise RuntimeError('Seed record disappeared')
+        return row

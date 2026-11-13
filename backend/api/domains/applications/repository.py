@@ -5,6 +5,7 @@ from typing import Any
 from collections.abc import AsyncIterator
 from bson import ObjectId
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 from pymongo.asynchronous.database import AsyncDatabase
 from api.core.policy import Scope
 from api.domains.applications.schemas import ApplicationFilters
@@ -96,3 +97,16 @@ class ApplicationRepository:
                 yield row
         finally:
             await cursor.close()
+
+    async def seed_ensure(self, document: dict[str, Any]) -> dict[str, Any]:
+        """Insert a missing natural key only; preserve operator edits on repeat runs."""
+        query = {'name': document['name']}
+        try:
+            await self.applications.update_one(query, {'$setOnInsert': document}, upsert=True)
+        except DuplicateKeyError:
+            # The unique natural-key winner is returned below, never overwritten.
+            pass
+        row = await self.applications.find_one(query)
+        if row is None:
+            raise RuntimeError('Seed record disappeared')
+        return row

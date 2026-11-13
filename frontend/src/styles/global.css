@@ -85,3 +85,16 @@ input[type=checkbox] { width: 24px; min-height: 24px; height: 24px; padding: 0; 
 .comparison-track > span { display: block; height: 100%; background: var(--deep-forest-teal); border-radius: inherit; }
 @media (max-width: 1023px) { .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 639px) { .dashboard-metrics { grid-template-columns: 1fr; } }
+
+/* Reuse the existing dialog for a keyboard-contained small-screen navigation drawer. */
+.desktop-navigation nav { flex-wrap: wrap; }
+.mobile-navigation-trigger { display: none; }
+.mobile-drawer .modal-overlay { place-items: stretch end; padding: 0; }
+.mobile-drawer .modal-panel { width: min(100%, 360px); max-height: 100dvh; height: 100dvh; border-radius: 0; }
+.mobile-drawer nav { align-items: stretch; flex-direction: column; margin-top: var(--space-3); }
+.mobile-drawer nav a { padding: var(--space-2) 0; }
+nav a[aria-current=page] { font-weight: 700; }
+@media (max-width: 1023px) {
+  .desktop-navigation { display: none; }
+  .mobile-navigation-trigger { display: block; }
+}

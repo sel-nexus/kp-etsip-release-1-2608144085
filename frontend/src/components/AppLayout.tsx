@@ -1,4 +1,6 @@
 /** Show current session identity and links only to implemented routes. */
+import { useState } from 'react';
+import { Modal } from './Modal';
 import { Link, useLocation } from 'react-router-dom';
 import { useSession } from '../features/auth/SessionProvider';
 import { useRequest } from '../lib/useRequest';
@@ -9,6 +11,7 @@ import { PasswordChangeForm } from '../features/profile/PasswordChangeForm';
 /** Render the authenticated shell with explicit sign-out and identity refresh. */
 export function AppLayout({ children }: PropsWithChildren) {
   const location = useLocation();
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const session = useSession();
   const request = useRequest();
   const user = session.user;
@@ -17,11 +20,8 @@ export function AppLayout({ children }: PropsWithChildren) {
     try { await request.run(session.logout); }
     catch { /* Session is cleared by provider even if the server is unavailable. */ }
   };
-  return (
-    <div className="app-shell">
-      <header className="app-header">
-        <Link to="/" className="brand">KP ETSIP</Link>
-        <nav aria-label="Session navigation">
+  const navigation = (
+        <nav aria-label="Session navigation" onClick={(event) => { if ((event.target as HTMLElement).closest('a')) setDrawerOpen(false); }}>
           <Link to="/" aria-current={location.pathname === '/' ? 'page' : undefined}>Session</Link>
           {!user.mustChangePassword && (
             <Link to="/dashboard" aria-current={location.pathname === '/dashboard' ? 'page' : undefined}>Dashboard</Link>
@@ -47,6 +47,23 @@ export function AppLayout({ children }: PropsWithChildren) {
           )}
           <Button variant="secondary" loading={request.loading} onClick={signOut}>Sign out</Button>
         </nav>
+  );
+  return (
+    <div className="app-shell">
+      <header className="app-header">
+        <Link to="/" className="brand">KP ETSIP</Link>
+        <div className="desktop-navigation">{navigation}</div>
+        <div className="mobile-navigation-trigger">
+          <Button variant="secondary" aria-expanded={drawerOpen} aria-haspopup="dialog" onClick={() => setDrawerOpen(true)}>Open navigation</Button>
+        </div>
+        {drawerOpen && (
+          <div className="mobile-drawer">
+            <Modal title="Navigation" onClose={() => setDrawerOpen(false)}>
+              <Button variant="secondary" onClick={() => setDrawerOpen(false)}>Close navigation</Button>
+              {navigation}
+            </Modal>
+          </div>
+        )}
       </header>
       <main className="container">
         {user.mustChangePassword ? (
