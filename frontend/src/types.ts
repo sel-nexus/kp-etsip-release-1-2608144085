@@ -102,3 +102,14 @@ export interface UserWrite {
   vendorIndicator: boolean;
 }
 export interface UserCreate extends UserWrite { password: string }
+
+/** Keep the role editor aligned with the closed backend action vocabulary. */
+export type Permission = 'view' | 'create' | 'edit' | 'delete' | 'export' | 'administer';
+export interface RoleDefinition {
+  id: string;
+  name: RoleName;
+  description: string;
+  permissions: Permission[];
+  createdAt: string;
+  updatedAt: string;
+}

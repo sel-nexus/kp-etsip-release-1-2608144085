@@ -6,6 +6,7 @@ import LoginPage from './features/auth/LoginPage';
 import PortfolioList from './features/portfolios/PortfolioList';
 import PortfolioDetailPage from './features/portfolios/PortfolioDetailPage';
 import UserAdminPage from './features/users/UserAdminPage';
+import RoleAdminPage from './features/roles/RoleAdminPage';
 import ApplicationList from './features/applications/ApplicationList';
 import ApplicationDetailPage from './features/applications/ApplicationDetailPage';
 import { AppLayout } from './components/AppLayout';
@@ -59,6 +60,11 @@ export function AppRoutes() {
           </AppLayout>
         ) : <Navigate to="/" replace /> : <Navigate to="/login" replace />} />
       ))}
+      <Route path="/roles" element={session.user ? session.user.role === 'Administrator' ? (
+        <AppLayout>
+          <RoleAdminPage />
+        </AppLayout>
+      ) : <Navigate to="/" replace /> : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
