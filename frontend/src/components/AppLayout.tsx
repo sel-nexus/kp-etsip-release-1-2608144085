@@ -23,6 +23,9 @@ export function AppLayout({ children }: PropsWithChildren) {
         <Link to="/" className="brand">KP ETSIP</Link>
         <nav aria-label="Session navigation">
           <Link to="/" aria-current={location.pathname === '/' ? 'page' : undefined}>Session</Link>
+          {!user.mustChangePassword && (
+            <Link to="/dashboard" aria-current={location.pathname === '/dashboard' ? 'page' : undefined}>Dashboard</Link>
+          )}
           {!user.mustChangePassword && <Link to="/profile" aria-current={location.pathname === '/profile' ? 'page' : undefined}>My profile</Link>}
           {!user.mustChangePassword && (
             <Link to="/portfolios" aria-current={location.pathname.startsWith('/portfolios') ? 'page' : undefined}>Portfolios</Link>

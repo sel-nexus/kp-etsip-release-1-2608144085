@@ -71,3 +71,17 @@ class ApplicationRepository:
         """Delete only the observed scoped application version."""
         query = {'$and': [self.predicate(scope, ApplicationFilters(), snapshot['_id']), {'updatedAt': snapshot['updatedAt'], 'portfolioId': snapshot['portfolioId']}]}
         return (await self.applications.delete_one(query)).deleted_count == 1
+
+    async def dashboard_totals(self, scope: Scope, filters: ApplicationFilters) -> list[dict[str, Any]]:
+        """Aggregate exact sums after the shared scope-first filter predicate."""
+        cursor = await self.applications.aggregate([
+            {'$match': self.predicate(scope, filters)},
+            {'$group': {
+                '_id': '$portfolioId', 'count': {'$sum': 1},
+                'quality': {'$sum': '$qualityScore'}, 'health': {'$sum': '$applicationHealthScore'},
+                'automation': {'$sum': '$automationCoverage'},
+                'critical_defects': {'$sum': '$openCriticalDefects'},
+                'at_risk': {'$sum': {'$cond': [{'$eq': ['$riskLevel', 'High']}, 1, 0]}},
+            }},
+        ])
+        return await cursor.to_list(None)

@@ -30,6 +30,7 @@ const fillPasswords = async (current = 'old', replacement = 'new', confirm = rep
 describe('Profile and first-password gate', () => {
   it('resolves completed audit landing while retaining future-page fallback', () => {
     expect(landingPath('audit')).toBe('/audit');
+    expect(landingPath('dashboard')).toBe('/dashboard');
     expect(landingPath('reports')).toBe('/');
     expect(landingPath(null)).toBe('/');
   });
@@ -38,7 +39,7 @@ describe('Profile and first-password gate', () => {
     expect(await screen.findByText(identity.name)).toBeVisible();
     expect(screen.getByText(identity.email)).toBeVisible();
     expect(screen.getByText('No portfolio access')).toBeVisible();
-    expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/', '/', '/profile', '/portfolios', '/applications']);
+    expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/', '/', '/dashboard', '/profile', '/portfolios', '/applications']);
     expect(screen.queryByRole('option', { name: 'Users' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Audit' })).not.toBeInTheDocument();
   });

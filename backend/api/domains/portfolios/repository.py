@@ -82,3 +82,13 @@ class PortfolioRepository:
         """Delete only the previously observed scoped portfolio snapshot."""
         query = {'$and': [self.predicate(scope, PortfolioFilters(), identifier), {'updatedAt': updated_at, '_applicationDeleting': True, '_applicationReservations.0': {'$exists': False}}]}
         return (await self.portfolios.delete_one(query)).deleted_count == 1
+
+    async def count_visible(self, scope: Scope) -> int:
+        """Count all visible documents, including empty and archived portfolios."""
+        return await self.portfolios.count_documents(self.predicate(scope, PortfolioFilters()))
+
+    async def names(self, scope: Scope, identifiers: list[ObjectId]) -> dict[str, str]:
+        """Read represented labels only within the same authorized portfolio scope."""
+        query = {'$and': [scope.predicate('_id'), {'_id': {'$in': identifiers}}]}
+        rows = await self.portfolios.find(query, {'name': 1}).to_list(None)
+        return {str(row['_id']): row['name'] for row in rows}

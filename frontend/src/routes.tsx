@@ -2,6 +2,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useSession } from './features/auth/SessionProvider';
 import ProfilePage from './features/profile/ProfilePage';
+import DashboardPage from './features/dashboard/DashboardPage';
 import LoginPage from './features/auth/LoginPage';
 import PortfolioList from './features/portfolios/PortfolioList';
 import PortfolioDetailPage from './features/portfolios/PortfolioDetailPage';
@@ -29,6 +30,11 @@ export function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={session.user ? <AppLayout /> : <Navigate to="/login" replace />} />
+      <Route path="/dashboard" element={session.user ? (
+        <AppLayout>
+          <DashboardPage />
+        </AppLayout>
+      ) : <Navigate to="/login" replace />} />
       <Route path="/profile" element={session.user ? session.user.mustChangePassword ? <Navigate to="/" replace /> : (
         <AppLayout>
           <ProfilePage />

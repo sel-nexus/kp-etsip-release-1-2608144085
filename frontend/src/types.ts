@@ -126,3 +126,24 @@ export interface AuditRow {
   entityId: string | null;
   details: string;
 }
+
+/** Match the executive response without calculating scores in the browser. */
+export interface DashboardMetrics {
+  enterpriseQualityScore: number | null;
+  averageApplicationHealthScore: number | null;
+  automationMaturityScore: number | null;
+  openCriticalDefects: number;
+  applicationsAtRisk: number;
+  totalApplications: number;
+  totalPortfolios: number;
+}
+export interface PortfolioComparisonRow {
+  portfolioId: string;
+  name: string;
+  qualityScore: number;
+  applicationsAtRisk: number;
+}
+export interface Dashboard {
+  metrics: DashboardMetrics;
+  portfolioComparisons: PortfolioComparisonRow[];
+}

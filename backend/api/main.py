@@ -12,6 +12,7 @@ from api.domains.applications.router import router as application_router
 from api.domains.users.router import router as user_router
 from api.domains.roles.router import router as role_router
 from api.domains.audit.router import router as audit_router
+from api.domains.dashboard.router import router as dashboard_router
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Compose implemented routers only, with validated startup configuration."""
@@ -29,6 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(user_router)
     application.include_router(role_router)
     application.include_router(audit_router)
+    application.include_router(dashboard_router)
     @application.middleware('http')
     async def private_api(request: Request, call_next):
         """Prevent shared caches from retaining authenticated responses."""

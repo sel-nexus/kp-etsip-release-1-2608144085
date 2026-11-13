@@ -71,3 +71,17 @@ input[type=checkbox] { width: 24px; min-height: 24px; height: 24px; padding: 0; 
 /* Historical summaries retain line breaks and fit the existing responsive table. */
 .audit-history td { overflow-wrap: anywhere; vertical-align: top; }
 .audit-history td:last-child { white-space: pre-wrap; min-width: 200px; }
+
+/* Executive inventory extends Vital Integrity without new palette or typography tokens. */
+.dashboard-page { display: grid; gap: var(--space-3); }
+.dashboard-page .page-heading, .dashboard-page form { margin: 0; }
+.dashboard-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--grid-gutter); margin: 0; }
+.metric-card { padding: var(--space-3); border: 1px solid var(--card-border); border-radius: var(--radius-lg); background: var(--surface-container-lowest); }
+.metric-card dt { font: var(--label-md); line-height: 1.5; }
+.metric-card dd { margin-top: var(--space-2); font: var(--headline-md); font-variant-numeric: tabular-nums; }
+.comparison-caption { text-align: left; padding: var(--space-2); color: var(--on-surface-variant); font: var(--body-sm); }
+.comparison-quality { display: flex; gap: var(--space-2); align-items: center; }
+.comparison-track { display: block; width: 160px; height: var(--space-1); background: var(--surface-container); border-radius: var(--radius-sm); }
+.comparison-track > span { display: block; height: 100%; background: var(--deep-forest-teal); border-radius: inherit; }
+@media (max-width: 1023px) { .dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 639px) { .dashboard-metrics { grid-template-columns: 1fr; } }
