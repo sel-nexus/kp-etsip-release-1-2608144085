@@ -82,3 +82,23 @@ export interface Application extends ApplicationWrite {
 export interface ApplicationDetail extends Application {
   portfolio: Pick<Portfolio, 'id' | 'name' | 'productArea' | 'status'>;
 }
+
+/** Share the full administration DTO without any credential fields. */
+export interface AdminUser extends UserWrite {
+  id: string;
+  lastLogin: string | null;
+  authSource: 'local';
+  mustChangePassword: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface UserWrite {
+  name: string;
+  email: string;
+  role: RoleName;
+  portfolioAccess: string[];
+  status: 'Active' | 'Inactive';
+  managerName: string | null;
+  vendorIndicator: boolean;
+}
+export interface UserCreate extends UserWrite { password: string }

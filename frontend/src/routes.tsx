@@ -5,6 +5,7 @@ import ProfilePage from './features/profile/ProfilePage';
 import LoginPage from './features/auth/LoginPage';
 import PortfolioList from './features/portfolios/PortfolioList';
 import PortfolioDetailPage from './features/portfolios/PortfolioDetailPage';
+import UserAdminPage from './features/users/UserAdminPage';
 import ApplicationList from './features/applications/ApplicationList';
 import ApplicationDetailPage from './features/applications/ApplicationDetailPage';
 import { AppLayout } from './components/AppLayout';
@@ -51,6 +52,13 @@ export function AppRoutes() {
           <ApplicationDetailPage />
         </AppLayout>
       ) : <Navigate to="/login" replace />} />
+      {['/users', '/users/:id'].map((path) => (
+        <Route key={path} path={path} element={session.user ? session.user.role === 'Administrator' ? (
+          <AppLayout>
+            <UserAdminPage />
+          </AppLayout>
+        ) : <Navigate to="/" replace /> : <Navigate to="/login" replace />} />
+      ))}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

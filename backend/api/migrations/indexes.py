@@ -2,11 +2,13 @@
 import asyncio
 from pymongo.asynchronous.database import AsyncDatabase
 from pymongo import AsyncMongoClient
+from pymongo.collation import Collation
 from api.core.config import Settings
 
 async def create_indexes(database: AsyncDatabase) -> None:
     """Block initialization if required unique or audit indexes cannot be built."""
     await database.users.create_index('email', unique=True)
+    await database.users.create_index('email', name='users_email_case_insensitive', unique=True, collation=Collation(locale='en', strength=2))
     await database.roles.create_index('name', unique=True)
     await database.portfolios.create_index('name', unique=True)
     await database.portfolios.create_index([('status', 1), ('productArea', 1)])
